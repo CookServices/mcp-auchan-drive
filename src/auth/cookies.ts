@@ -24,13 +24,12 @@ import { createRequire } from 'node:module';
 
 const _require = createRequire(import.meta.url);
 
-// Cookies toujours requis (quelle que soit l'implémentation)
-const REQUIRED = ['lark-session', 'datadome', 'lark-consentId'] as const;
 const AUCHAN_URL = 'https://www.auchan.fr';
 
-// Pour Firefox : ces cookies sont obligatoires pour s'authentifier.
-// Tous les autres cookies www.auchan.fr / .auchan.fr sont envoyés automatiquement
-// (comme un navigateur), ce qui inclut connect.sid, lark-browser-uuid, etc.
+// Cookies dont l'absence signale une session inutilisable. Ils servent de
+// contrôle de présence : tous les autres cookies du domaine sont envoyés en
+// plus, comme le ferait un navigateur.
+const REQUIRED = ['lark-session', 'datadome', 'lark-consentId'] as const;
 const FF_REQUIRED = ['lark-session', 'lark-consentId'] as const;
 
 // ─── EnvCookieProvider ────────────────────────────────────────────────────────
@@ -85,7 +84,12 @@ export class ChromeCookieProvider implements CookieProvider {
       throw new Error('Missing required cookies: ' + missing.join(', '));
     }
 
-    this.cached = REQUIRED.map((name) => name + '=' + all[name]).join('; ');
+    // Envoyer tous les cookies du domaine, comme le fait Firefox. Se limiter à
+    // REQUIRED écartait connect.sid — présent dans Chrome, mais jamais transmis —
+    // et les pages du compte client redirigeaient alors vers Keycloak.
+    this.cached = Object.entries(all)
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
     return this.cached;
   }
 

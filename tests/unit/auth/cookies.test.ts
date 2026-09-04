@@ -54,23 +54,24 @@ const FULL_COOKIES = {
   'lark-session': 'sess1',
   'datadome': 'dd1',
   'lark-consentId': 'cid1',
-  'extra-cookie': 'ignored',
+  // Cookie de session applicative : son absence renvoyait les pages du compte
+  // vers Keycloak, alors qu'il est bien présent dans le profil Chrome.
+  'connect.sid': 'sid1',
 };
 
 describe('ChromeCookieProvider', () => {
-  it('getCookie() retourne les 3 cookies dans le bon ordre', async () => {
+  it('getCookie() retourne tous les cookies du domaine', async () => {
     const { loader } = makeLoader(FULL_COOKIES);
     const p = new ChromeCookieProvider('Default', loader);
     await expect(p.getCookie()).resolves.toBe(
-      'lark-session=sess1; datadome=dd1; lark-consentId=cid1',
+      'lark-session=sess1; datadome=dd1; lark-consentId=cid1; connect.sid=sid1',
     );
   });
 
-  it('les cookies supplémentaires sont ignorés dans la chaîne', async () => {
+  it('transmet connect.sid, sans quoi les pages du compte redirigent vers la connexion', async () => {
     const { loader } = makeLoader(FULL_COOKIES);
     const p = new ChromeCookieProvider('Default', loader);
-    const cookie = await p.getCookie();
-    expect(cookie).not.toContain('extra-cookie');
+    await expect(p.getCookie()).resolves.toContain('connect.sid=sid1');
   });
 
   it('getCookie() appelle le loader une seule fois si appelé 2× (cache)', async () => {
