@@ -102,8 +102,12 @@ export function parseSearchResults(html: string): SearchProduct[] {
     const hrefM = ctx.match(/href="[^"]*\/pr-(C\d+)/);
     const catalogCode = hrefM ? hrefM[1] : undefined;
 
-    // Disponibilité
-    const available = !tag.includes('disabled');
+    // Disponibilité : l'<article> porte la classe outOfStock quand le produit
+    // est en rupture sur le drive actif. Le sélecteur de quantité ne suffit pas —
+    // un produit en rupture passait pour disponible, et POST /cart/update
+    // l'ignorait sans erreur.
+    const outOfStock = /class="[^"]*outOfStock/.test(ctx) || ctx.includes('product-unavailable');
+    const available = !tag.includes('disabled') && !outOfStock;
 
     products.push({
       productId,

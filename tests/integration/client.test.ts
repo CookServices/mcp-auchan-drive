@@ -199,6 +199,21 @@ describe('AuchanClient.addToCart', () => {
 
 // ── updateQuantity ────────────────────────────────────────────────────────────
 
+describe('AuchanClient.addToCart post-condition', () => {
+  it('leve si le produit est absent du panier retourne', async () => {
+    // POST /cart/update repond 200 avec le panier inchange quand le produit est
+    // en rupture : sans controle, l'ajout parait reussi et l'article manque.
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve(cartGetFixture) } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, json: () => Promise.resolve(cartGetFixture) } as Response);
+    const client = new AuchanClient(fakeCookies(), fastThrottler(), 'https://www.auchan.fr', fetchFn);
+
+    await expect(client.addToCart(
+      'produit-en-rupture', 'offer', 'seller', 'GROCERY', 1,
+    )).rejects.toThrow(/refuse par le panier/);
+  });
+});
+
 describe('AuchanClient.updateQuantity', () => {
   it('met à jour la quantité d\'un article existant', async () => {
     const fetchFn = vi.fn()

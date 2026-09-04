@@ -253,7 +253,19 @@ export class AuchanClient {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body,
     });
-    return mapCart(await response.json());
+    const cart = mapCart(await response.json());
+
+    // POST /cart/update repond 200 avec le panier inchange quand le produit est
+    // en rupture sur le drive actif. Sans ce controle, l'ajout parait reussi et
+    // l'article manque a la commande.
+    if (!cart.items.some((item) => item.productId === productId)) {
+      throw new Error(
+        `Produit "${productId}" refuse par le panier - probablement en rupture sur le drive actif. `
+        + 'Le panier est inchange.',
+      );
+    }
+
+    return cart;
   }
 
   /** Mise à jour de la quantité d'un article déjà dans le panier. */
