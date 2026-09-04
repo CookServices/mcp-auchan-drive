@@ -5,3 +5,4 @@ dist/
 !package-lock.json
 coverage/
 store-state.json
+canary.log
