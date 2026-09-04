@@ -144,21 +144,46 @@ quelle requête vers `www.auchan.fr` → Headers de requête → Cookie).
 
 ## Outils MCP exposés
 
+**Catalogue**
+
 | Outil | Paramètres | Description |
 |---|---|---|
-| `search_product` | `query: string` | Recherche dans le catalogue → liste de produits avec prix, marque, disponibilité |
-| `search_promos` | `query?: string`, `category?: string` | Produits en promotion (sans arg = toutes les promos) |
-| `add_to_cart` | `product_id: string`, `quantity?: number` | Ajoute un produit au panier (utiliser `search_product` d'abord) |
+| `search_product` | `query: string`, `category?: string` | Cherche un produit dans le catalogue du drive actif. Rend nom, marque, prix, format, disponibilité et taxonomie rayon. `category` restreint aux produits dont un niveau de rayon correspond, ce qui écarte les faux positifs |
+| `search_promos` | `query?: string`, `category?: string` | Liste les produits en promotion sur le drive actif (sans argument : toutes les promos) |
+
+**Panier**
+
+| Outil | Paramètres | Description |
+|---|---|---|
+| `add_to_cart` | `product_id: string`, `quantity?: number` | Ajoute un produit au panier. Nécessite un `search_product` préalable dans la même session. Lève si le produit est en rupture sur le drive actif |
 | `remove_from_cart` | `product_id: string` | Retire complètement un produit du panier |
-| `update_quantity` | `product_id: string`, `quantity: number` | Modifie la quantité (0 = retire l'article) |
-| `get_cart` | — | Lit le panier complet avec le total |
+| `update_quantity` | `product_id: string`, `quantity: number` | Modifie la quantité d'une ligne (0 = retire l'article) |
+| `get_cart` | — | Lit le panier : lignes, quantités, prix unitaires et total. `unknownLabels` indique combien de lignes n'ont pas pu être nommées |
+
+**Drive**
+
+| Outil | Paramètres | Description |
+|---|---|---|
 | `find_stores` | `query: string` | Trouve les drives Auchan proches d'une ville ou d'un code postal |
-| `set_store` | `store_id: string`, `store_name?: string` | Sélectionne le drive actif |
+| `set_store` | `store_id: string`, `store_name?: string` | Sélectionne le drive actif, celui dont dépendent prix et disponibilités |
 | `get_store` | — | Affiche le drive actuellement sélectionné |
-| `get_loyalty_info` | — | Lit le programme de fidélité : cagnotte, carte Waaoh, Jour W!, défis |
-| `get_loyalty_history` | — | Historique des transactions de cagnotte des 3 derniers mois |
-| `get_orders` | `period?: string` | Historique des commandes (`10days`, `30days`, `3months`…) |
-| `get_favorites` | — | Liste des produits favoris avec prix actuels et promos en cours |
+
+**Compte client**
+
+| Outil | Paramètres | Description |
+|---|---|---|
+| `get_orders` | `period?: string` | Liste les commandes sur une période : date, magasin, statut, total. Valeurs : `10days`, `30days`, `3months` (défaut), `6months`, `current_year`, `2025`, `2024` |
+| `get_order_detail` | `order_ref: string`, `order_number: string` | Ouvre une commande et rend toutes ses lignes produit, avec quantités, prix et rayon. Les deux paramètres viennent de `get_orders` |
+| `get_favorites` | — | Liste les produits achetés régulièrement, avec prix actuels et promotions en cours |
+| `get_loyalty_info` | — | Rend l'état du programme Waaoh! : cagnotte, carte, Jour W!, défis en cours |
+| `get_loyalty_history` | — | Historique des mouvements de cagnotte des 3 derniers mois |
+
+> Aucun outil ne valide de commande : le serveur remplit le panier, le créneau et
+> le paiement restent à faire sur le site.
+
+En pratique, la boucle utile enchaîne `find_stores` → `set_store`, puis `get_orders`
+et `get_order_detail` pour lire les habitudes, `search_product` pour retrouver les
+produits, `add_to_cart` pour remplir, et `get_cart` pour vérifier ce qui a été écrit.
 
 ### Exemple de session Claude — courses
 

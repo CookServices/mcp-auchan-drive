@@ -2,11 +2,12 @@
 /**
  * index.ts — Serveur MCP Auchan Drive
  *
- * Expose 10 outils via le protocole MCP (stdio) :
- *   search_product, add_to_cart, remove_from_cart, update_quantity,
- *   get_cart, find_stores, set_store, get_store, get_loyalty_info, get_orders
- *   search_product, search_promos, add_to_cart, remove_from_cart, update_quantity,
- *   get_cart, find_stores, set_store, get_store, get_loyalty_info, get_loyalty_history, get_favorites
+ * Expose 14 outils via le protocole MCP (stdio) :
+ *   catalogue — search_product, search_promos
+ *   panier    — add_to_cart, remove_from_cart, update_quantity, get_cart
+ *   drive     — find_stores, set_store, get_store
+ *   compte    — get_orders, get_order_detail, get_favorites,
+ *               get_loyalty_info, get_loyalty_history
  */
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
