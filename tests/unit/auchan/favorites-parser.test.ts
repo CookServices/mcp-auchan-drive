@@ -1,70 +1,119 @@
 import { describe, it, expect } from 'vitest';
 import { parseFavoritesPage } from '../../../src/auchan/favorites-parser.js';
 
-// HTML minimal reproduisant la structure réelle de /client/mes-produits-preferes
-// 2 rayons, 3 produits dont 1 en promo et 1 indisponible.
+interface CardOptions {
+  id: string;
+  code: string;
+  slug: string;
+  name: string;
+  brand: string;
+  level1: string;
+  level2: string;
+  format?: string;
+  pricePerUnit?: string;
+  price: string;
+  promo?: string;
+  /** Absent = produit non drivable (pas de sélecteur de quantité). */
+  stock?: number;
+  disabled?: boolean;
+  available?: boolean;
+  /** Retire `data-list="frequent_products"` : carte de recommandation. */
+  recommendation?: boolean;
+}
+
+/**
+ * Reproduit une carte de /client/mes-produits-preferes : un <article> suivi du
+ * <script> `productUpdateDetail`, qui en est le frère et non un descendant.
+ */
+function card(opts: CardOptions): string {
+  const payload = JSON.stringify({
+    product: {
+      name: opts.name,
+      grocery: true,
+      id: { digital: opts.id, ref_fo: opts.code, cug: '000000' },
+      availability: { status: opts.available ?? true },
+      category: { level1: opts.level1, level2: opts.level2 },
+      brand: { internal: false, name: opts.brand },
+    },
+  });
+
+  const attributes = [
+    opts.format ? `<span class="product-attribute" aria-label="Contenance">${opts.format}</span>` : '',
+    opts.pricePerUnit ? `<span data-seller-type="GROCERY">${opts.pricePerUnit}</span>` : '',
+  ].join('\n');
+
+  const quantitySelector =
+    opts.stock === undefined
+      ? ''
+      : `<div class="quantity-selector qa2c-wrapper" data-product-id="${opts.id}" data-stock="${opts.stock}" data-disable-button="${opts.disabled ?? false}"></div>`;
+
+  const promo = opts.promo
+    ? `<div class="discount-markups"><div class="product-discount"><span class="product-discount-label">${opts.promo}</span></div></div>`
+    : '';
+
+  return `
+  <article itemscope="itemscope" itemtype="http://schema.org/Product" class="product-thumbnail  product-thumbnail--column  " data-id="${opts.id}"${opts.recommendation ? '' : ' data-list="frequent_products"'}>
+    <div class="product-thumbnail__content-wrapper">
+      <a class="product-thumbnail__details-wrapper productThumbnailLink" href="/${opts.slug}/pr-${opts.code}" data-id="${opts.id}">
+        <div class="product-thumbnail__details">
+          <p class="product-thumbnail__description" itemprop="name description"><strong>${opts.brand}</strong> ${opts.name}</p>
+          <div class="product-thumbnail__attributes">
+            ${attributes}
+          </div>
+        </div>
+      </a>
+    </div>
+    <footer class="product-thumbnail__footer">
+      <div class="product-thumbnail__commercials">${promo}</div>
+      <div class="product-thumbnail__footer-wrapper">
+        <div class="product-thumbnail__price product-price__container">
+          <div class="product-price bolder text-dark-color">${opts.price}</div>
+        </div>
+        <div class="product-thumbnail__call-to-actions">${quantitySelector}</div>
+      </div>
+    </footer>
+  </article>
+  <script>
+    const productUpdateDetail = ${payload};
+    (window.G.productSearchQueue = window.G.productSearchQueue || []).push(productUpdateDetail);
+  </script>`;
+}
+
+const ORANGINA: CardOptions = {
+  id: 'id-orangina', code: 'C1820950', slug: 'orangina-boisson-gazeuse-a-l-orange',
+  name: "Boisson gazeuse à l'orange", brand: 'ORANGINA',
+  level1: 'BOISSONS', level2: 'BOISSONS SANS ALCOOL',
+  format: '1,5l', pricePerUnit: '1,29&#x20AC; / l', price: '1,93&#x20AC;',
+  promo: '-50% sur le 2&#xE8;me', stock: 21,
+};
+
+const EVIAN: CardOptions = {
+  id: 'id-evian', code: 'C1000001', slug: 'evian-eau-minerale-naturelle',
+  name: 'Eau minérale naturelle', brand: 'EVIAN',
+  level1: 'BOISSONS', level2: 'EAUX', price: '3,45&#x20AC;', stock: 12,
+};
+
+const PANZANI: CardOptions = {
+  id: 'id-panzani', code: 'C1000002', slug: 'panzani-pates-spaghetti',
+  name: 'Pâtes spaghetti', brand: 'PANZANI',
+  level1: 'EPICERIE', level2: 'PATES', price: '1,15&#x20AC;',
+  stock: 0, disabled: true,
+};
+
 const FULL_HTML = `
 <html><body>
-
-<section class="t-myFavorites__section">
-  <h2 class="t-myFavorites__categoryTitle">Eaux, jus, sodas, thés glacés</h2>
-
-  <!-- Produit 1 : disponible, avec promo et prix/unité -->
-  <article class="product-thumbnail">
-    <a href="/orangina-boisson-gazeuse-a-l-orange/pr-C1820950">Voir le produit</a>
-    <p class="product-thumbnail__description"><strong>ORANGINA</strong> Boisson gazeuse à l'orange</p>
-    <span class="product-attribute">1,5l</span>
-    <div class="product-price">1,93 €</div>
-    <span class="product-price-perUnit">1,29 € / l</span>
-    <span class="a-promotionLabel">-50% sur le 2ème</span>
-    <div class="quantity-selector" data-product-id="uuid-orangina">Dans mon drive</div>
-  </article>
-
-  <!-- Produit 2 : disponible, sans promo ni prix/unité -->
-  <article class="product-thumbnail">
-    <a href="/evian-eau-minerale-naturelle/pr-C1234567">Voir le produit</a>
-    <p class="product-thumbnail__description"><strong>EVIAN</strong> Eau minérale naturelle</p>
-    <span class="product-attribute">6x1,5l</span>
-    <div class="product-price">3,50 €</div>
-    <div class="quantity-selector" data-product-id="uuid-evian">Dans mon drive</div>
-  </article>
-</section>
-
-<section class="t-myFavorites__section">
-  <h2 class="t-myFavorites__categoryTitle">Épicerie salée</h2>
-
-  <!-- Produit 3 : indisponible (quantity-selector disabled) -->
-  <article class="product-thumbnail">
-    <a href="/panzani-pates-spaghetti/pr-C9876543">Voir le produit</a>
-    <p class="product-thumbnail__description"><strong>PANZANI</strong> Pâtes spaghetti</p>
-    <span class="product-attribute">500g</span>
-    <div class="product-price">1,20 €</div>
-    <div class="quantity-selector disabled" data-product-id="uuid-panzani">Indisponible</div>
-  </article>
-</section>
-
-</body></html>
-`;
-
-// Variante : produit sans quantity-selector du tout (indisponible — « Dans mon drive » absent)
-const NO_QUANTITY_SELECTOR_HTML = `
-<html><body>
-<section class="t-myFavorites__section">
-  <h2 class="t-myFavorites__categoryTitle">Épicerie sucrée</h2>
-  <article class="product-thumbnail">
-    <a href="/lu-petit-beurre/pr-C1111111">Voir le produit</a>
-    <p class="product-thumbnail__description"><strong>LU</strong> Petit beurre</p>
-    <span class="product-attribute">200g</span>
-    <div class="product-price">1,50 €</div>
-  </article>
-</section>
+<div class="wishlist__content">
+${card(ORANGINA)}
+${card(EVIAN)}
+${card(PANZANI)}
+</div>
 </body></html>
 `;
 
 describe('parseFavoritesPage', () => {
-  // ── Résultats généraux ─────────────────────────────────────────────────────
+  // ── Page vide ──────────────────────────────────────────────────────────────
 
-  it('retourne un tableau vide sur une page sans section', () => {
+  it('retourne un tableau vide sur une page sans carte', () => {
     expect(parseFavoritesPage('<html><body></body></html>')).toEqual([]);
   });
 
@@ -73,121 +122,123 @@ describe('parseFavoritesPage', () => {
     expect(products).toHaveLength(3);
   });
 
-  // ── Catégories ─────────────────────────────────────────────────────────────
+  // ── Sélection des cartes ───────────────────────────────────────────────────
 
-  it('associe les produits à la bonne catégorie', () => {
+  it('ignore les cartes de recommandation', () => {
+    const html = `<html><body>${card(ORANGINA)}${card({ ...EVIAN, recommendation: true })}</body></html>`;
+    const products = parseFavoritesPage(html);
+    expect(products).toHaveLength(1);
+    expect(products[0].name).toBe("Boisson gazeuse à l'orange");
+  });
+
+  // ── Rayon ──────────────────────────────────────────────────────────────────
+
+  it('associe les produits à leur rayon', () => {
     const products = parseFavoritesPage(FULL_HTML);
-    expect(products[0].category).toBe('Eaux, jus, sodas, thés glacés');
-    expect(products[1].category).toBe('Eaux, jus, sodas, thés glacés');
-    expect(products[2].category).toBe('Épicerie salée');
+    expect(products[0].category).toBe('BOISSONS');
+    expect(products[2].category).toBe('EPICERIE');
+  });
+
+  it('expose la taxonomie rayon complète', () => {
+    const products = parseFavoritesPage(FULL_HTML);
+    expect(products[0].categoryPath).toEqual(['BOISSONS', 'BOISSONS SANS ALCOOL']);
   });
 
   // ── Nom et marque ──────────────────────────────────────────────────────────
 
   it('extrait le nom sans la marque', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.name).toBe("Boisson gazeuse à l'orange");
   });
 
   it('extrait la marque séparément', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.brand).toBe('ORANGINA');
   });
 
   it('extrait le nom et la marque du deuxième produit', () => {
-    const [, p2] = parseFavoritesPage(FULL_HTML);
+    const p2 = parseFavoritesPage(FULL_HTML)[1];
     expect(p2.name).toBe('Eau minérale naturelle');
     expect(p2.brand).toBe('EVIAN');
   });
 
-  // ── Format ────────────────────────────────────────────────────────────────
+  // ── Format ─────────────────────────────────────────────────────────────────
 
   it('extrait le format du produit', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.format).toBe('1,5l');
   });
 
-  // ── Prix ──────────────────────────────────────────────────────────────────
+  // ── Prix ───────────────────────────────────────────────────────────────────
 
   it('parse le prix en centimes', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
-    expect(p.price).toBe(193); // "1,93 €" → 193
+    const p = parseFavoritesPage(FULL_HTML)[0];
+    expect(p.price).toBe(193);
   });
 
   it('conserve le prix formaté', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
-    expect(p.priceFormatted).toBe('1,93 €');
+    const p = parseFavoritesPage(FULL_HTML)[0];
+    expect(p.priceFormatted).toBe('1,93€');
   });
 
   it('extrait le prix par unité', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
-    expect(p.pricePerUnit).toBe('1,29 € / l');
+    const p = parseFavoritesPage(FULL_HTML)[0];
+    expect(p.pricePerUnit).toBe('1,29€ / l');
   });
 
   it('retourne pricePerUnit undefined si absent', () => {
-    const [, p2] = parseFavoritesPage(FULL_HTML);
+    const p2 = parseFavoritesPage(FULL_HTML)[1];
     expect(p2.pricePerUnit).toBeUndefined();
   });
 
-  // ── Promotion ─────────────────────────────────────────────────────────────
+  // ── Promotion ──────────────────────────────────────────────────────────────
 
   it('extrait la promotion du premier produit', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.promo).toBe('-50% sur le 2ème');
   });
 
   it('retourne promo undefined si absente', () => {
-    const [, p2] = parseFavoritesPage(FULL_HTML);
+    const p2 = parseFavoritesPage(FULL_HTML)[1];
     expect(p2.promo).toBeUndefined();
   });
 
   // ── URL et code produit ────────────────────────────────────────────────────
 
   it('extrait l\'URL produit', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.productUrl).toBe('/orangina-boisson-gazeuse-a-l-orange/pr-C1820950');
   });
 
   it('extrait le code produit depuis le slug', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.productCode).toBe('C1820950');
   });
 
-  // ── Disponibilité ─────────────────────────────────────────────────────────
+  // ── Disponibilité ──────────────────────────────────────────────────────────
 
-  it('available = true si quantity-selector sans disabled', () => {
-    const [p] = parseFavoritesPage(FULL_HTML);
+  it('available = true quand le sélecteur de quantité est actif', () => {
+    const p = parseFavoritesPage(FULL_HTML)[0];
     expect(p.available).toBe(true);
   });
 
-  it('available = false si quantity-selector avec disabled', () => {
-    const products = parseFavoritesPage(FULL_HTML);
-    const panzani = products[2];
+  it('available = false quand le sélecteur est désactivé', () => {
+    const panzani = parseFavoritesPage(FULL_HTML)[2];
     expect(panzani.name).toBe('Pâtes spaghetti');
     expect(panzani.available).toBe(false);
   });
 
-  it('available = false si quantity-selector absent (produit non drivable)', () => {
-    const [p] = parseFavoritesPage(NO_QUANTITY_SELECTOR_HTML);
-    expect(p.available).toBe(false);
+  it('retombe sur le JSON embarqué si le sélecteur est absent', () => {
+    const html = `<html><body>${card({ ...ORANGINA, stock: undefined, available: false })}</body></html>`;
+    expect(parseFavoritesPage(html)[0].available).toBe(false);
   });
 
-  // ── Décodage HTML ─────────────────────────────────────────────────────────
+  // ── Décodage ───────────────────────────────────────────────────────────────
 
   it('décode les entités HTML dans la marque', () => {
-    const html = `
-<html><body>
-<section class="t-myFavorites__section">
-  <h2 class="t-myFavorites__categoryTitle">Épicerie</h2>
-  <article>
-    <a href="/elle-vire-beurre/pr-C1264653">Voir</a>
-    <p class="product-thumbnail__description"><strong>ELLE &amp; VIRE</strong> Beurre doux</p>
-    <div class="product-price">2,98 €</div>
-    <div class="quantity-selector" data-product-id="uuid-1">Dans mon drive</div>
-  </article>
-</section>
-</body></html>`;
-    const [p] = parseFavoritesPage(html);
-    expect(p.brand).toBe('ELLE & VIRE');
+    const html = `<html><body>${card({
+      ...EVIAN, id: 'id-ev', brand: 'ELLE & VIRE', name: 'Beurre doux',
+    })}</body></html>`;
+    expect(parseFavoritesPage(html)[0].brand).toBe('ELLE & VIRE');
   });
 });

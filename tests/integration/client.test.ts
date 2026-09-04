@@ -475,28 +475,40 @@ describe('AuchanClient.getLoyaltyInfo', () => {
 
 const FAVORITES_HTML = `
 <html><body>
-<section class="t-myFavorites__section">
-  <h2 class="t-myFavorites__categoryTitle">Eaux, jus, sodas, thés glacés</h2>
-  <article class="product-thumbnail">
-    <a href="/orangina-boisson-gazeuse-a-l-orange/pr-C1820950">Voir le produit</a>
-    <p class="product-thumbnail__description"><strong>ORANGINA</strong> Boisson gazeuse à l'orange</p>
-    <span class="product-attribute">1,5l</span>
-    <div class="product-price">1,93 €</div>
-    <span class="product-price-perUnit">1,29 € / l</span>
-    <span class="a-promotionLabel">-50% sur le 2ème</span>
-    <div class="quantity-selector" data-product-id="uuid-orangina">Dans mon drive</div>
+<div class="wishlist__content">
+  <article class="product-thumbnail product-thumbnail--column" data-id="uuid-orangina" data-list="frequent_products">
+    <a class="product-thumbnail__details-wrapper" href="/orangina-boisson-gazeuse-a-l-orange/pr-C1820950">
+      <p class="product-thumbnail__description">Boisson gazeuse à l'orange</p>
+      <div class="product-thumbnail__attributes">
+        <span class="product-attribute">1,5l</span>
+        <span data-seller-type="GROCERY">1,29€ / l</span>
+      </div>
+    </a>
+    <footer class="product-thumbnail__footer">
+      <div class="discount-markups"><span class="product-discount-label">-50% sur le 2ème</span></div>
+      <div class="product-price">1,93 €</div>
+      <div class="quantity-selector" data-product-id="uuid-orangina" data-stock="21" data-disable-button="false"></div>
+    </footer>
   </article>
-</section>
-<section class="t-myFavorites__section">
-  <h2 class="t-myFavorites__categoryTitle">Épicerie salée</h2>
-  <article class="product-thumbnail">
-    <a href="/panzani-pates-spaghetti/pr-C9876543">Voir le produit</a>
-    <p class="product-thumbnail__description"><strong>PANZANI</strong> Pâtes spaghetti</p>
-    <span class="product-attribute">500g</span>
-    <div class="product-price">1,20 €</div>
-    <div class="quantity-selector disabled" data-product-id="uuid-panzani">Indisponible</div>
+  <script>
+    const productUpdateDetail = {"product":{"name":"Boisson gazeuse à l'orange","id":{"digital":"uuid-orangina","ref_fo":"C1820950"},"availability":{"status":true},"category":{"level1":"BOISSONS","level2":"BOISSONS SANS ALCOOL"},"brand":{"internal":false,"name":"ORANGINA"}}};
+  </script>
+  <article class="product-thumbnail product-thumbnail--column" data-id="uuid-panzani" data-list="frequent_products">
+    <a class="product-thumbnail__details-wrapper" href="/panzani-pates-spaghetti/pr-C9876543">
+      <p class="product-thumbnail__description">Pâtes spaghetti</p>
+      <div class="product-thumbnail__attributes">
+        <span class="product-attribute">500g</span>
+      </div>
+    </a>
+    <footer class="product-thumbnail__footer">
+      <div class="product-price">1,20 €</div>
+      <div class="quantity-selector" data-product-id="uuid-panzani" data-stock="0" data-disable-button="true"></div>
+    </footer>
   </article>
-</section>
+  <script>
+    const productUpdateDetail = {"product":{"name":"Pâtes spaghetti","id":{"digital":"uuid-panzani","ref_fo":"C9876543"},"availability":{"status":false},"category":{"level1":"EPICERIE","level2":"PATES"},"brand":{"internal":false,"name":"PANZANI"}}};
+  </script>
+</div>
 </body></html>
 `;
 
@@ -513,10 +525,10 @@ describe('AuchanClient.getFavorites', () => {
     expect(favorites).toHaveLength(2);
     expect(favorites[0].name).toBe("Boisson gazeuse à l'orange");
     expect(favorites[0].brand).toBe('ORANGINA');
-    expect(favorites[0].category).toBe('Eaux, jus, sodas, thés glacés');
+    expect(favorites[0].category).toBe('BOISSONS');
     expect(favorites[0].price).toBe(193);
     expect(favorites[0].priceFormatted).toBe('1,93 €');
-    expect(favorites[0].pricePerUnit).toBe('1,29 € / l');
+    expect(favorites[0].pricePerUnit).toBe('1,29€ / l');
     expect(favorites[0].promo).toBe('-50% sur le 2ème');
     expect(favorites[0].productCode).toBe('C1820950');
     expect(favorites[0].available).toBe(true);
@@ -560,24 +572,44 @@ describe('AuchanClient.getFavorites', () => {
 
 const ORDERS_HTML = `
 <html><body>
-<ul>
-  <li>
-    <span>Drive</span>
-    <span>Auchan Drive Caluire</span>
-    <span>Commande n° 370069704 du 14 juin 2026</span>
-    <span>Enregistrée</span>
-    <span>14 Produits</span>
-    <span>38,62 €</span>
-    <a href="/client/mes-commandes/AROM-761999631/370069704">Modifier / Annuler...</a>
+<ul class="t-orders__wrapper t-orders__wrapper__list">
+  <li class="t-orders__item" data-fetch="/customer/async/orders/details/AROM-761999631/370069704/false">
+    <div class="p-order">
+      <div class="p-order__header">
+        <div class="a-pointOfService">
+          <div class="a-pointOfService__infos">
+            <span class="a-pointOfService__label">Retrait</span>
+            <span class="a-pointOfService__place">Auchan Drive Caluire</span>
+          </div>
+        </div>
+        <div class="p-order__reference">Commande n° 370069704 du 14 juin 2026</div>
+        <div class="a-simplifiedState"><span class="a-simplifiedState__label">Enregistrée</span></div>
+      </div>
+      <div class="p-order__footer">
+        <div class="m-productThumbnails__count"><span>14</span> Produits</div>
+        <div class="p-order__totalAmount">38,62 €</div>
+        <a href="/client/mes-commandes/AROM-761999631/370069704" class="btn">Voir le détail</a>
+      </div>
+    </div>
   </li>
-  <li>
-    <span>Drive</span>
-    <span>Auchan Drive Lyon Nord</span>
-    <span>Commande n° 370000001 du 2 mai 2026</span>
-    <span>Retirée</span>
-    <span>7 Produits</span>
-    <span>21,50 €</span>
-    <a href="/client/mes-commandes/AROM-123456789/370000001">Détails</a>
+  <li class="t-orders__item" data-fetch="/customer/async/orders/details/AROM-123456789/370000001/false">
+    <div class="p-order">
+      <div class="p-order__header">
+        <div class="a-pointOfService">
+          <div class="a-pointOfService__infos">
+            <span class="a-pointOfService__label">Retrait</span>
+            <span class="a-pointOfService__place">Auchan Drive Lyon Nord</span>
+          </div>
+        </div>
+        <div class="p-order__reference">Commande n° 370000001 du 2 mai 2026</div>
+        <div class="a-simplifiedState"><span class="a-simplifiedState__label">Retirée</span></div>
+      </div>
+      <div class="p-order__footer">
+        <div class="m-productThumbnails__count"><span>7</span> Produits</div>
+        <div class="p-order__totalAmount">21,50 €</div>
+        <a href="/client/mes-commandes/AROM-123456789/370000001" class="btn">Voir le détail</a>
+      </div>
+    </div>
   </li>
 </ul>
 </body></html>
@@ -675,23 +707,50 @@ describe('AuchanClient.getOrders', () => {
 
 const ORDER_DETAIL_HTML = `
 <html><body>
-<ol class="o-orderStatus__list">
-  <li class="o-orderStatus__step o-orderStatus__step--active"><span>Enregistrée</span></li>
-  <li class="o-orderStatus__step"><span>En cours de préparation</span></li>
-  <li class="o-orderStatus__step"><span>Commande disponible</span></li>
-  <li class="o-orderStatus__step"><span>Retirée</span></li>
-</ol>
-<p>Retrait prévu le: mardi 16 juin entre 17h00 et 17h30</p>
-<div class="m-storeInfo">
-  <p class="m-storeInfo__name">Auchan Drive Caluire</p>
-  <p class="m-storeInfo__address">10 Chemin Jean Petit 69300 CALUIRE-ET-CUIRE</p>
+<div class="p-detail__header">
+  <div class="p-detail__pointOfService">
+    <div class="a-pointOfService">
+      <div class="a-pointOfService__infos">
+        <span class="a-pointOfService__label">Drive</span>
+        <span class="a-pointOfService__place">Auchan Drive Caluire</span>
+      </div>
+    </div>
+  </div>
+  <div class="p-detail__simplifiedState">
+    <div class="a-simplifiedState"><span class="a-simplifiedState__label">Enregistrée</span></div>
+  </div>
 </div>
-<span class="m-orderSummary__totalPrice">38,62 €</span>
-<h2 class="m-orderProductList__categoryTitle">Boucherie, volaille, poissonnerie</h2>
-<div class="m-orderProduct">
-  <p class="m-orderProduct__name"><strong>AUCHAN</strong> Chipolatas supérieures aux herbes</p>
-  <span class="m-orderProduct__quantity">Quantité : 6</span>
-  <span class="m-orderProduct__price">8,34 €</span>
+<div class="p-detail__addressesAndDelivery">
+  <div class="p-detail__deliveryModeAndDate">
+    <div class="p-detail__deliveryDate">Retrait prévu le: mardi 16 juin entre 17h00 et 17h30</div>
+  </div>
+  <div class="p-detail__address">
+    <strong>Magasin</strong>
+    Auchan Drive Caluire<br>
+    10 Chemin Jean Petit<br>
+    69300 CALUIRE-ET-CUIRE
+  </div>
+</div>
+<section class="o-products__list">
+  <div class="o-products__category" role="heading">Boucherie, volaille, poissonnerie</div>
+  <div class="o-products__line m-productItem" role="list">
+    <article class="product-thumbnail m-productItem__product" data-id="uuid-chipo">
+      <a class="product-thumbnail__details-wrapper" href="/auchan-chipolatas/pr-C1000010">
+        <p class="product-thumbnail__description">Chipolatas supérieures aux herbes</p>
+      </a>
+    </article>
+    <script>
+      const productUpdateDetail = {"product":{"name":"Chipolatas supérieures aux herbes","id":{"digital":"uuid-chipo","ref_fo":"C1000010"},"availability":{"status":true},"category":{"level1":"PRODUITS FRAIS","level2":"BOUCHERIE"},"brand":{"internal":true,"name":"AUCHAN"}}};
+    </script>
+    <aside class="m-productItem__aside">
+      <div class="a-amount"><div class="a-amount__amount">8,34 €</div></div>
+      <div class="p-detail__productQuantity">Quantité : 6</div>
+    </aside>
+  </div>
+</section>
+<div class="m-receipt__total m-receipt__line">
+  <span class="m-receipt__label">Total</span>
+  <strong class="m-receipt__value">38,62 €</strong>
 </div>
 </body></html>
 `;

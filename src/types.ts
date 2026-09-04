@@ -40,6 +40,8 @@ export interface FavoriteProduct {
   brand?: string;
   format?: string;
   category: string;
+  /** Taxonomie rayon complète, du plus général au plus fin. */
+  categoryPath?: string[];
   price: number;
   priceFormatted: string;
   pricePerUnit?: string;
@@ -68,6 +70,8 @@ export interface OrderProduct {
   price: number;
   priceFormatted: string;
   category: string;
+  /** Taxonomie rayon complète, du plus général au plus fin. */
+  categoryPath?: string[];
 }
 
 export interface OrderDetail {
