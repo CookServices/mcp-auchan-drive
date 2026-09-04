@@ -6,3 +6,4 @@ dist/
 coverage/
 store-state.json
 canary.log
+canary-task.log
