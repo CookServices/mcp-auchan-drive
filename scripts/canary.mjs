@@ -34,6 +34,28 @@ const verbose = process.argv.includes('--verbose');
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const logFile = path.join(repoRoot, 'canary.log');
 
+/**
+ * Fichier témoin déposé sur le bureau en cas de panne, et retiré au retour à la
+ * normale. C'est le seul canal d'alerte qui ne dépende d'aucun réglage : les
+ * notifications Windows peuvent être coupées globalement (ToastEnabled = 0),
+ * auquel cas l'API les accepte sans jamais les afficher.
+ */
+const alertFile = path.join(desktopDir(), 'PANNE-CANARI.txt');
+
+function desktopDir() {
+  const candidates = [
+    process.env.OneDrive ? path.join(process.env.OneDrive, 'Desktop') : null,
+    process.env.USERPROFILE ? path.join(process.env.USERPROFILE, 'Desktop') : null,
+  ].filter(Boolean);
+
+  for (const dir of candidates) {
+    try {
+      if (fs.statSync(dir).isDirectory()) return dir;
+    } catch { /* candidat suivant */ }
+  }
+  return repoRoot; // pas de bureau identifiable : le dépôt fait l'affaire
+}
+
 const results = [];
 
 /** Enregistre le résultat d'un contrôle. `skipped` n'est pas un échec. */
@@ -145,19 +167,48 @@ try {
   fs.appendFileSync(logFile, `${stamp}  ${summary}\n`, 'utf-8');
 } catch { /* le journal ne doit jamais faire échouer le canari */ }
 
+// Distinguer les deux causes : une session expirée se règle en se reconnectant,
+// un markup modifié demande de corriger les parsers.
+const authExpired = failures.some((f) => /non authentifi/i.test(f.detail));
+const cause = authExpired
+  ? 'Session expirée. Reconnectez-vous à auchan.fr dans le navigateur lu (AUCHAN_BROWSER).'
+  : 'Le markup du site a probablement changé. Les parsers sont à mettre à jour.';
+
 if (failures.length > 0) {
   console.error(`\nCanari auchan-drive — ${failures.length} contrôle(s) en échec (${stamp})`);
   for (const f of failures) console.error(`  - ${f.name} : ${f.detail}`);
+  console.error(`\nCause probable : ${cause}`);
 
-  // Distinguer les deux causes : une session expirée se règle en se reconnectant,
-  // un markup modifié demande de corriger les parsers.
-  const authExpired = failures.some((f) => /non authentifi/i.test(f.detail));
-  console.error(authExpired
-    ? '\nCause probable : session expirée. Reconnectez-vous à auchan.fr dans le navigateur lu.'
-    : '\nCause probable : le markup du site a changé. Voir scripts/canary.mjs.');
+  try {
+    // BOM UTF-8 : sans lui, le Bloc-notes et PowerShell lisent le fichier en
+    // ANSI et affichent « ContrÃ´les » au lieu de « Contrôles ».
+    fs.writeFileSync(alertFile, '﻿' + [
+      'CANARI AUCHAN DRIVE - PANNE DETECTEE',
+      '',
+      `Date       : ${new Date().toLocaleString('fr-FR')}`,
+      `Contrôles  : ${failures.length} en échec sur ${results.length}`,
+      '',
+      ...failures.map((f) => `  - ${f.name}\n    ${f.detail}`),
+      '',
+      `Cause probable : ${cause}`,
+      '',
+      `Journal complet : ${path.join(repoRoot, 'canary-task.log')}`,
+      '',
+      'Ce fichier disparaît de lui-même dès que le canari repasse au vert.',
+      '',
+    ].join('\n'), 'utf-8');
+  } catch { /* l'alerte fichier ne doit jamais masquer l'échec réel */ }
 
   process.exit(1);
 }
+
+// Retour à la normale : retirer le témoin d'une panne précédente.
+try {
+  if (fs.existsSync(alertFile)) {
+    fs.unlinkSync(alertFile);
+    if (verbose) console.log('Panne précédente résolue — témoin retiré du bureau.');
+  }
+} catch { /* sans conséquence */ }
 
 if (verbose) console.log(`\n${summary}`);
 process.exit(0);
