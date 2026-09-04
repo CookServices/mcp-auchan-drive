@@ -95,6 +95,30 @@ describe('AuchanClient.search', () => {
     expect(results).toEqual([]);
   });
 
+  it('retente une reponse vide puis rend les produits', async () => {
+    const fetchFn = vi.fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK', text: () => Promise.resolve('') } as Response)
+      .mockResolvedValueOnce({ ok: true, status: 200, statusText: 'OK', text: () => Promise.resolve(SEARCH_HTML) } as Response);
+    const client = new AuchanClient(fakeCookies(), fastThrottler(), 'https://www.auchan.fr', fetchFn);
+
+    const results = await client.search('beurre');
+
+    expect(results).toHaveLength(1);
+    expect(fetchFn).toHaveBeenCalledTimes(2);
+  });
+
+  it('leve sur une reponse vide persistante au lieu de rendre []', async () => {
+    // Sous throttling, auchan.fr repond 200 avec un corps vide : sans garde,
+    // parseSearchResults('') rend [] et le blocage passe pour un catalogue vide.
+    const fetchFn = vi.fn().mockResolvedValue({
+      ok: true, status: 200, statusText: 'OK', text: () => Promise.resolve(''),
+    } as Response);
+    const client = new AuchanClient(fakeCookies(), fastThrottler(), 'https://www.auchan.fr', fetchFn);
+
+    await expect(client.search('beurre')).rejects.toThrow(/throttling anti-bot/);
+    expect(fetchFn).toHaveBeenCalledTimes(4);
+  });
+
   it('lève une erreur sur 403 après épuisement des retries', async () => {
     const fetch403 = vi.fn().mockResolvedValue({
       ok: false,

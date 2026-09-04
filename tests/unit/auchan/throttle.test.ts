@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { Throttler } from '../../../src/auchan/throttle.js';
+import { Throttler, RetryableError } from '../../../src/auchan/throttle.js';
 
 // Fake timers pour accélérer les tests
 beforeEach(() => {
@@ -12,6 +12,31 @@ afterEach(() => {
 });
 
 describe('Throttler', () => {
+  it('retente une RetryableError puis retourne le resultat', async () => {
+    const throttler = new Throttler({ minIntervalMs: 0, jitterMs: 0, maxRetries: 3, backoffBaseMs: 0 });
+    const task = vi.fn()
+      .mockRejectedValueOnce(new RetryableError('reponse vide'))
+      .mockRejectedValueOnce(new RetryableError('reponse vide'))
+      .mockResolvedValue('ok');
+
+    const p = throttler.run(task);
+    await vi.runAllTimersAsync();
+
+    await expect(p).resolves.toBe('ok');
+    expect(task).toHaveBeenCalledTimes(3);
+  });
+
+  it('propage la RetryableError apres epuisement des retries', async () => {
+    const throttler = new Throttler({ minIntervalMs: 0, jitterMs: 0, maxRetries: 2, backoffBaseMs: 0 });
+    const task = vi.fn().mockRejectedValue(new RetryableError('reponse vide'));
+
+    const p = throttler.run(task);
+    await vi.runAllTimersAsync();
+
+    await expect(p).rejects.toThrow(RetryableError);
+    expect(task).toHaveBeenCalledTimes(3);
+  });
+
   it('exécute une tâche et retourne son résultat', async () => {
     const throttler = new Throttler({ minIntervalMs: 0, jitterMs: 0 });
     const result = await throttler.run(() => Promise.resolve(42));
