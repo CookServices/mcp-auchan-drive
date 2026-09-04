@@ -67,17 +67,24 @@ export function parseSearchResults(html: string): SearchProduct[] {
     const end = Math.min(html.length, tagMatch.index + 500);
     const ctx = html.slice(start, end);
 
+    const embedded = taxonomy.get(productId);
+
     // Nom du produit — extrait le contenu texte complet du paragraphe (strip balises enfants)
     const descM = ctx.match(/class="[^"]*product-thumbnail__description[^"]*"[^>]*>([\s\S]*?)<\/p>/);
-    const name = descM
+    const htmlName = descM
       ? decode(descM[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
       : '';
+
+    // Certaines cartes rendent leur description hors de la fenêtre de contexte :
+    // le JSON embarqué porte alors le nom. Un produit sans nom casse toute
+    // sélection par libellé, ce qui le rend invisible aux appelants.
+    const name = htmlName || embedded?.name || '';
 
     // Marque — cherche d'abord dans la description (structure actuelle), puis dans ctx (fallback)
     const brandM =
       (descM?.[1] ?? '').match(/<strong[^>]*>\s*([^<]+)\s*<\/strong>/) ??
       ctx.match(/<strong[^>]*>\s*([^<]+)\s*<\/strong>/);
-    const brand = brandM ? decode(brandM[1].trim()) : undefined;
+    const brand = brandM ? decode(brandM[1].trim()) : embedded?.brand;
 
     // Prix principal
     const priceM = ctx.match(/class="[^"]*product-price[^"]*"[^>]*>\s*([\d\s,.'€]+)/);
@@ -110,8 +117,8 @@ export function parseSearchResults(html: string): SearchProduct[] {
       format,
       available,
       catalogCode,
-      category: taxonomy.get(productId)?.category,
-      categoryPath: taxonomy.get(productId)?.categoryPath,
+      category: embedded?.category,
+      categoryPath: embedded?.categoryPath,
     });
   }
 
