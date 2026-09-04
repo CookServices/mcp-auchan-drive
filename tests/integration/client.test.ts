@@ -546,15 +546,25 @@ describe('AuchanClient.getFavorites', () => {
     expect(url).toBe('https://www.auchan.fr/client/mes-produits-preferes');
   });
 
-  it('retourne [] si la page ne contient aucune section', async () => {
+  it('retourne [] quand le compte na aucun favori', async () => {
+    const client = new AuchanClient(
+      fakeCookies(),
+      fastThrottler(),
+      'https://www.auchan.fr',
+      mockFetchHtml('<html><body><div class="wishlist__content"></div></body></html>'),
+    );
+    const favorites = await client.getFavorites();
+    expect(favorites).toEqual([]);
+  });
+
+  it('leve si la page recue nest pas celle des favoris', async () => {
     const client = new AuchanClient(
       fakeCookies(),
       fastThrottler(),
       'https://www.auchan.fr',
       mockFetchHtml('<html><body>Connectez-vous</body></html>'),
     );
-    const favorites = await client.getFavorites();
-    expect(favorites).toEqual([]);
+    await expect(client.getFavorites()).rejects.toThrow(/Structure inattendue/);
   });
 
   it('lève une erreur sur 403', async () => {
@@ -681,15 +691,25 @@ describe('AuchanClient.getOrders', () => {
     expect(url).toBe('https://www.auchan.fr/client/mes-commandes?year=2024');
   });
 
-  it('retourne [] si la page ne contient aucune commande', async () => {
+  it('retourne [] quand la periode ne contient aucune commande', async () => {
+    const client = new AuchanClient(
+      fakeCookies(),
+      fastThrottler(),
+      'https://www.auchan.fr',
+      mockFetchHtml('<html><body><ul class="t-orders__wrapper"></ul></body></html>'),
+    );
+    const orders = await client.getOrders();
+    expect(orders).toEqual([]);
+  });
+
+  it('leve si la page recue nest pas celle des commandes', async () => {
     const client = new AuchanClient(
       fakeCookies(),
       fastThrottler(),
       'https://www.auchan.fr',
       mockFetchHtml('<html><body><ul></ul></body></html>'),
     );
-    const orders = await client.getOrders();
-    expect(orders).toEqual([]);
+    await expect(client.getOrders()).rejects.toThrow(/Structure inattendue/);
   });
 
   it('lève une erreur sur 403', async () => {
@@ -775,16 +795,26 @@ describe('AuchanClient.getOrderDetail', () => {
     expect(url).toBe('https://www.auchan.fr/client/mes-commandes/AROM-761999631/370069704');
   });
 
-  it('retourne un OrderDetail vide si la page ne contient rien', async () => {
+  it('retourne un OrderDetail vide sur une commande sans produit', async () => {
+    const client = new AuchanClient(
+      fakeCookies(),
+      fastThrottler(),
+      'https://www.auchan.fr',
+      mockFetchHtml('<html><body><section class="p-detail"></section></body></html>'),
+    );
+    const detail = await client.getOrderDetail('REF', '000');
+    expect(detail.products).toEqual([]);
+    expect(detail.storeName).toBe('');
+  });
+
+  it('leve si la page recue nest pas celle du detail', async () => {
     const client = new AuchanClient(
       fakeCookies(),
       fastThrottler(),
       'https://www.auchan.fr',
       mockFetchHtml('<html><body></body></html>'),
     );
-    const detail = await client.getOrderDetail('REF', '000');
-    expect(detail.products).toEqual([]);
-    expect(detail.storeName).toBe('');
+    await expect(client.getOrderDetail('REF', '000')).rejects.toThrow(/Structure inattendue/);
   });
 
   it('lève une erreur sur 403', async () => {

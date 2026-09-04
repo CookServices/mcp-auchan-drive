@@ -13,6 +13,7 @@
 import type { FavoriteProduct } from '../types.js';
 import { parsePrice, decode, extractTagBlocks } from './html-utils.js';
 import { extractEmbeddedProducts } from './product-json.js';
+import { assertAuthenticated, assertAnchor } from './page-guard.js';
 
 /** Attribut qui distingue les produits favoris des carrousels de recommandation. */
 const FAVORITES_MARKER = 'data-list="frequent_products"';
@@ -23,6 +24,10 @@ const FAVORITES_MARKER = 'data-list="frequent_products"';
  * provient de la taxonomie du JSON embarqué.
  */
 export function parseFavoritesPage(html: string): FavoriteProduct[] {
+  assertAuthenticated(html, '/client/mes-produits-preferes');
+  // Présent même quand le compte n'a encore aucun produit favori.
+  assertAnchor(html, 'wishlist__content', '/client/mes-produits-preferes');
+
   const results: FavoriteProduct[] = [];
 
   // Le <script> productUpdateDetail est un frère de l'<article>, pas un descendant :
@@ -47,6 +52,7 @@ export function parseFavoritesPage(html: string): FavoriteProduct[] {
     const priceFormatted = textOf(card, 'product-price');
 
     results.push({
+      productId: dataId || undefined,
       name,
       brand: embedded?.brand,
       format: textOf(card, 'product-attribute') || undefined,

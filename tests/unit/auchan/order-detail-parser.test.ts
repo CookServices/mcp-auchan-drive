@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseOrderDetailPage } from '../../../src/auchan/order-detail-parser.js';
+import { PageShapeError, NotAuthenticatedError } from '../../../src/auchan/page-guard.js';
 
 /** Ligne produit telle que rendue dans une section de rayon. */
 function line(opts: {
@@ -249,10 +250,21 @@ describe('parseOrderDetailPage', () => {
 
   // ── Page vide ─────────────────────────────────────────────────────────────
 
-  it('retourne un OrderDetail vide sur page sans produit', () => {
-    const d = parseOrderDetailPage('<html><body></body></html>', 'REF', '000');
+  it('retourne un OrderDetail vide sur une commande sans produit', () => {
+    const d = parseOrderDetailPage('<html><body><section class="p-detail"></section></body></html>', 'REF', '000');
     expect(d.products).toEqual([]);
     expect(d.storeName).toBe('');
     expect(d.total).toBe(0);
+  });
+
+  it('leve si le conteneur de la page est absent', () => {
+    expect(() => parseOrderDetailPage('<html><body></body></html>', 'REF', '000')).toThrow(PageShapeError);
+  });
+
+  it('leve si la page est un ecran de connexion', () => {
+    const login = '<html><head><title>Se connecter a auchan.fr</title></head><body>'
+      + '<form action="https://compte.auchan.fr/auth/realms/auchan.fr/protocol/openid-connect/auth">'
+      + '<input type="password" name="password"></form></body></html>';
+    expect(() => parseOrderDetailPage(login, 'REF', '000')).toThrow(NotAuthenticatedError);
   });
 });

@@ -1,5 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { parseFavoritesPage } from '../../../src/auchan/favorites-parser.js';
+import { PageShapeError, NotAuthenticatedError } from '../../../src/auchan/page-guard.js';
+
+/** Enveloppe des cartes dans le conteneur que la page rend toujours. */
+const page = (body: string) => `<html><body><div class="wishlist__content">${body}</div></body></html>`;
 
 interface CardOptions {
   id: string;
@@ -113,8 +117,19 @@ ${card(PANZANI)}
 describe('parseFavoritesPage', () => {
   // ── Page vide ──────────────────────────────────────────────────────────────
 
-  it('retourne un tableau vide sur une page sans carte', () => {
-    expect(parseFavoritesPage('<html><body></body></html>')).toEqual([]);
+  it('retourne un tableau vide quand le compte n\'a aucun favori', () => {
+    expect(parseFavoritesPage(page(''))).toEqual([]);
+  });
+
+  it('lève si le conteneur de la page est absent', () => {
+    expect(() => parseFavoritesPage('<html><body></body></html>')).toThrow(PageShapeError);
+  });
+
+  it('lève si la page est un écran de connexion', () => {
+    const login = '<html><head><title>Se connecter à auchan.fr</title></head><body>'
+      + '<form action="https://compte.auchan.fr/auth/realms/auchan.fr/protocol/openid-connect/auth">'
+      + '<input type="password" name="password"></form></body></html>';
+    expect(() => parseFavoritesPage(login)).toThrow(NotAuthenticatedError);
   });
 
   it('retourne 3 produits depuis le HTML complet', () => {
@@ -125,7 +140,7 @@ describe('parseFavoritesPage', () => {
   // ── Sélection des cartes ───────────────────────────────────────────────────
 
   it('ignore les cartes de recommandation', () => {
-    const html = `<html><body>${card(ORANGINA)}${card({ ...EVIAN, recommendation: true })}</body></html>`;
+    const html = page(`${card(ORANGINA)}${card({ ...EVIAN, recommendation: true })}`);
     const products = parseFavoritesPage(html);
     expect(products).toHaveLength(1);
     expect(products[0].name).toBe("Boisson gazeuse à l'orange");
@@ -229,16 +244,16 @@ describe('parseFavoritesPage', () => {
   });
 
   it('retombe sur le JSON embarqué si le sélecteur est absent', () => {
-    const html = `<html><body>${card({ ...ORANGINA, stock: undefined, available: false })}</body></html>`;
+    const html = page(card({ ...ORANGINA, stock: undefined, available: false }));
     expect(parseFavoritesPage(html)[0].available).toBe(false);
   });
 
   // ── Décodage ───────────────────────────────────────────────────────────────
 
   it('décode les entités HTML dans la marque', () => {
-    const html = `<html><body>${card({
+    const html = page(card({
       ...EVIAN, id: 'id-ev', brand: 'ELLE & VIRE', name: 'Beurre doux',
-    })}</body></html>`;
+    }));
     expect(parseFavoritesPage(html)[0].brand).toBe('ELLE & VIRE');
   });
 });

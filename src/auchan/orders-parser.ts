@@ -5,6 +5,7 @@
 
 import type { Order } from '../types.js';
 import { parsePrice, decode, extractTagBlocks } from './html-utils.js';
+import { assertAuthenticated, assertAnchor } from './page-guard.js';
 
 export type { Order };
 
@@ -37,6 +38,10 @@ export type { Order };
  * fiable pour ces deux champs.
  */
 export function parseOrdersPage(html: string): Order[] {
+  assertAuthenticated(html, '/client/mes-commandes');
+  // Présent même quand la période filtrée ne contient aucune commande.
+  assertAnchor(html, 't-orders__wrapper', '/client/mes-commandes');
+
   const orders: Order[] = [];
 
   for (const block of extractTagBlocks(html, 'li', 't-orders__item')) {

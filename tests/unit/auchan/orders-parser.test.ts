@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parseOrdersPage } from '../../../src/auchan/orders-parser.js';
+import { PageShapeError, NotAuthenticatedError } from '../../../src/auchan/page-guard.js';
 
 /**
  * Construit un <li class="t-orders__item"> reproduisant la structure réelle de
@@ -224,8 +225,14 @@ describe('parseOrdersPage', () => {
     expect(orders).toEqual([]);
   });
 
-  it('retourne [] pour un HTML vide', () => {
-    const orders = parseOrdersPage('<html></html>');
-    expect(orders).toEqual([]);
+  it('leve si le conteneur de la page est absent', () => {
+    expect(() => parseOrdersPage('<html></html>')).toThrow(PageShapeError);
+  });
+
+  it('leve si la page est un ecran de connexion', () => {
+    const login = '<html><head><title>Se connecter a auchan.fr</title></head><body>'
+      + '<form action="https://compte.auchan.fr/auth/realms/auchan.fr/protocol/openid-connect/auth">'
+      + '<input type="password" name="password"></form></body></html>';
+    expect(() => parseOrdersPage(login)).toThrow(NotAuthenticatedError);
   });
 });

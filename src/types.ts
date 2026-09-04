@@ -36,6 +36,8 @@ export interface CookieProvider {
 }
 
 export interface FavoriteProduct {
+  /** UUID produit, identique au productId du panier et de search_product. */
+  productId?: string;
   name: string;
   brand?: string;
   format?: string;
@@ -64,6 +66,8 @@ export interface Order {
 }
 
 export interface OrderProduct {
+  /** UUID produit, identique au productId du panier et de search_product. */
+  productId?: string;
   name: string;
   brand: string;
   quantity: number;

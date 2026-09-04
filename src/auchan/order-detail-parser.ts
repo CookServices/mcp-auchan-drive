@@ -6,6 +6,7 @@
 import type { OrderDetail, OrderProduct } from '../types.js';
 import { parsePrice, decode, extractTagBlocks, stripTags, hasClass } from './html-utils.js';
 import { extractEmbeddedProducts } from './product-json.js';
+import { assertAuthenticated, assertAnchor } from './page-guard.js';
 
 /**
  * Parse la page HTML de détail d'une commande.
@@ -45,6 +46,9 @@ export function parseOrderDetailPage(
   orderRef: string,
   orderNumber: string,
 ): OrderDetail {
+  assertAuthenticated(html, `/client/mes-commandes/${orderRef}/${orderNumber}`);
+  assertAnchor(html, 'p-detail', `/client/mes-commandes/${orderRef}/${orderNumber}`);
+
   const storeName = textOf(html, 'a-pointOfService__place');
   const status = textOf(html, 'a-simplifiedState__label');
   const storeAddress = parseStoreAddress(html, storeName);
@@ -90,6 +94,7 @@ function parseProducts(html: string): OrderProduct[] {
       const quantity = Number(quantityText.match(/\d+/)?.[0] ?? 1);
 
       products.push({
+        productId: embedded?.digitalId || undefined,
         name,
         brand: embedded?.brand ?? '',
         quantity,

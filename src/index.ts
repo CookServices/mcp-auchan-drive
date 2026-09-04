@@ -25,11 +25,35 @@ import type { OrderPeriod } from './types.js';
 // a besoin de offerId / sellerId / sellerType
 const searchCache = new Map<string, SearchProduct>();
 
+// Index des noms de produits rencontrés pendant la session : productId → libellé.
+// GET /cart ne renvoie que des identifiants ; c'est la seule source de libellés
+// dont on dispose sans requête supplémentaire. Alimenté par les recherches, les
+// favoris et les détails de commande, il ne couvre donc que ce qui a été consulté.
+const productNames = new Map<string, string>();
+
+/** Mémorise le libellé d'un produit pour l'affichage ultérieur du panier. */
+function rememberName(productId: string | undefined, brand: string | undefined, name: string): void {
+  if (!productId || !name) return;
+  const label = brand && !name.startsWith(brand) ? `${brand} ${name}` : name;
+  productNames.set(productId, label);
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Encapsule n'importe quelle valeur sérialisable en CallToolResult. */
 function ok(value: unknown): { content: [{ type: 'text'; text: string }] } {
   return { content: [{ type: 'text' as const, text: JSON.stringify(value, null, 2) }] };
+}
+
+/** Normalise pour comparer des rayons sans tenir compte des accents ni de la casse. */
+function fold(text: string): string {
+  return text.toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+}
+
+/** Ne garde que les produits dont un niveau de rayon correspond à `category`. */
+function filterByCategory(products: SearchProduct[], category: string): SearchProduct[] {
+  const wanted = fold(category);
+  return products.filter((p) => (p.categoryPath ?? []).some((level) => fold(level).includes(wanted)));
 }
 
 /** Encapsule une erreur en CallToolResult avec isError:true. */
@@ -53,15 +77,29 @@ async function main(): Promise<void> {
   server.registerTool(
     'search_product',
     {
-      description: 'Recherche des produits dans le catalogue Auchan Drive.',
-      inputSchema: { query: z.string().describe('Terme de recherche (ex : "lait demi-écrémé")') },
+      description:
+        'Recherche des produits dans le catalogue Auchan Drive. ' +
+        'Chaque résultat porte sa taxonomie rayon (categoryPath). ' +
+        'Le filtre category restreint aux produits dont un niveau de rayon correspond, ' +
+        'ce qui écarte les faux positifs (ex : category "FRUITS ET LEGUMES" sur la ' +
+        'requête "oignons" élimine les biscuits apéritifs saveur oignon).',
+      inputSchema: {
+        query: z.string().describe('Terme de recherche (ex : "lait demi-écrémé")'),
+        category: z
+          .string()
+          .optional()
+          .describe('Rayon attendu, comparé à tous les niveaux de categoryPath (ex : "VOLAILLE")'),
+      },
     },
-    async ({ query }) => {
+    async ({ query, category }) => {
       try {
         const results = await client.search(query);
         searchCache.clear();
-        for (const p of results) searchCache.set(p.productId, p);
-        return ok(results);
+        for (const p of results) {
+          searchCache.set(p.productId, p);
+          rememberName(p.productId, p.brand, p.name);
+        }
+        return ok(category ? filterByCategory(results, category) : results);
       } catch (err) {
         return fail(err);
       }
@@ -168,13 +206,25 @@ async function main(): Promise<void> {
   server.registerTool(
     'get_cart',
     {
-      description: 'Lit le contenu complet du panier avec le total.',
+      description:
+        'Lit le contenu complet du panier avec le total. ' +
+        'GET /cart ne renvoyant que des identifiants, les libellés proviennent des ' +
+        'produits vus pendant la session (recherches, favoris, détails de commande) : ' +
+        'unknownLabels indique combien de lignes n\'ont pas pu être nommées.',
       inputSchema: {},
     },
     async () => {
       try {
         const cart = await client.getCart();
-        return ok(cart);
+        const items = cart.items.map((item) => ({
+          ...item,
+          label: item.label || productNames.get(item.productId) || '',
+        }));
+        return ok({
+          ...cart,
+          items,
+          unknownLabels: items.filter((i) => !i.label).length,
+        });
       } catch (err) {
         return fail(err);
       }
@@ -317,6 +367,7 @@ async function main(): Promise<void> {
     async () => {
       try {
         const favorites = await client.getFavorites();
+        for (const f of favorites) rememberName(f.productId, f.brand, f.name);
         return ok(favorites);
       } catch (err) {
         return fail(err);
@@ -341,6 +392,7 @@ async function main(): Promise<void> {
     async ({ order_ref, order_number }) => {
       try {
         const detail = await client.getOrderDetail(order_ref, order_number);
+        for (const p of detail.products) rememberName(p.productId, p.brand, p.name);
         return ok(detail);
       } catch (err) {
         return fail(err);

@@ -4,6 +4,7 @@
  */
 
 import { parsePrice, decode } from './html-utils.js';
+import { extractEmbeddedProducts } from './product-json.js';
 
 export interface SearchProduct {
   productId: string;   // data-product-id
@@ -17,6 +18,8 @@ export interface SearchProduct {
   format?: string;     // span.product-attribute
   available: boolean;  // true si pas class "disabled" sur le quantity-selector
   catalogCode?: string;// href="/produit/pr-C1264653" → "C1264653"
+  category?: string;   // rayon le plus général, ex. "PRODUITS FRAIS"
+  categoryPath?: string[]; // taxonomie complète, du plus général au plus fin
 }
 
 /** Extrait la valeur d'un attribut HTML depuis une balise ouvrante. */
@@ -34,6 +37,12 @@ function attr(tag: string, name: string): string | undefined {
  */
 export function parseSearchResults(html: string): SearchProduct[] {
   const products: SearchProduct[] = [];
+
+  // Le <script> productUpdateDetail est un frère de la carte, pas un descendant :
+  // on indexe la page entière, puis on rattache chaque produit par son identifiant.
+  const taxonomy = new Map(
+    extractEmbeddedProducts(html).filter((p) => p.digitalId).map((p) => [p.digitalId, p]),
+  );
 
   // Balise ouvrante du quantity-selector (chaque produit en a une)
   const tagRe = /<div[^>]+data-product-id="[^"]+"[^>]*>/g;
@@ -101,6 +110,8 @@ export function parseSearchResults(html: string): SearchProduct[] {
       format,
       available,
       catalogCode,
+      category: taxonomy.get(productId)?.category,
+      categoryPath: taxonomy.get(productId)?.categoryPath,
     });
   }
 
