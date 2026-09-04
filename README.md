@@ -26,6 +26,8 @@ Inspiré de [mcp-leclerc-drive](https://github.com/skunkobi/mcp-leclerc-drive) d
 
 - Node.js ≥ 18
 - Chrome **ou** Firefox installé avec une session Auchan Drive active
+  — sous Windows, Firefox est le seul provider utilisable sans outils de
+  compilation ([détails](#chrome-défaut))
 
 ---
 
@@ -109,6 +111,25 @@ un 403.
 
 Le serveur lit les cookies via `chrome-cookies-secure` depuis le profil `Default`.
 Pour un autre profil : `AUCHAN_CHROME_PROFILE=Profil 2`.
+
+> **Sous Windows, ce provider ne fonctionne pas sans outils de compilation.**
+>
+> Chrome y chiffre ses cookies via DPAPI, et `chrome-cookies-secure` délègue le
+> déchiffrement à `win-dpapi`, un module natif. Comme il s'agit d'une dépendance
+> *optionnelle*, sa compilation échoue **silencieusement** pendant `npm install` :
+> rien ne le signale, et l'erreur n'apparaît qu'au premier appel.
+>
+> ```
+> Error: Cannot find module 'win-dpapi'
+>     at getDerivedKey (chrome-cookies-secure/index.js:72)
+> ```
+>
+> Le compiler demande [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+> (plusieurs Go). **Utilisez plutôt Firefox** : son provider lit `cookies.sqlite`
+> directement, sans dépendance native.
+>
+> À défaut, `AUCHAN_COOKIE` (voir ci-dessous) fonctionne avec n'importe quel
+> navigateur, au prix d'un copier-coller à renouveler à chaque expiration de session.
 
 ### Mode headless / CI
 
