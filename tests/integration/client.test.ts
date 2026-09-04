@@ -440,31 +440,37 @@ describe('AuchanClient.searchPromos', () => {
 
 const LOYALTY_HTML = `
 <html><body>
-<div class="o-cardSelector__cardNumberAndName">
-  <div class="o-cardSelector__cardNumber">N° <strong>0000000000000</strong></div>
-  <div class="o-cardSelector__cardName">DOE John</div>
-</div>
-<div class="t-myLoyalty__amount o-loyaltyMyCard__amount">
-  <div class="o-loyaltyMyCard__row">
-    <span>Ma cagnotte au 04/06/2026</span>
-    <span class="a-waaohTag a-waaohTag--xlarge a-waaohTag--transparent">3,46 €</span>
+<article class="n-card n-card--white cockpit__aside-card">
+  <header class="n-card__header">
+    <h2 class="waaoh-card__title text-headline-s">Hello, John</h2>
+    <p class="text-body-s">N&#xB0; de compte Waaoh! : 00000000</p>
+  </header>
+  <article class="n-card waaoh-card">
+    <div class="waaoh-card__reward">
+      <div class="waaoh-card__reward-infos">
+        <p class="text-headline-m mt-s waaoh-card__reward-amount">3,46 &#x20AC;</p>
+      </div>
+      <div class="waaoh-card__reward-expiry mt-s"><p>Jusqu&#x2019;au 31/01/2027</p></div>
+    </div>
+  </article>
+  <div class="waaoh-card__menu">
+    <div class="waaoh-card__wallet"><p>Carte N&#xB0; 0000000000000</p></div>
   </div>
-</div>
-<div class="-waaohAccountID">Mon numéro de compte Waooh : 00000000</div>
-<div class="m-discountClubBox">
-  <div class="m-discountClubBox__title -waaoh">Votre jour W! est activé !</div>
-  <div class="m-discountClubBox__title -noBold">
-    Chaque <strong>mercredi</strong>, vous bénéficiez de
-    <strong>10 % cagnottés sur tous les produits frais des Halles*</strong>
-  </div>
-</div>
-<section class="t-myLoyalty__section t-myLoyalty__section--challenges">
-  <div><strong>Jusqu’au 30 juin 2026</strong>, profitez des Défis Waaoh.</div>
-  <div class="a-waaohChallengeTag">
-    Cagnotte Défis Waaoh
-    <span class="a-waaohChallengeTag__amount">0,00 €</span>
-  </div>
-</section>
+</article>
+<article class="n-card day-w-card">
+  <header class="n-card__header"><h2 class="text-headline-xs">10 % cagnott&#xE9;s sur les produits frais</h2></header>
+  <div class="n-card__content"><p>Mon jour W! : <strong>mercredi</strong></p></div>
+</article>
+<article class="n-card challenges-card">
+  <footer class="n-card__footer challenges-card__footer">
+    <div class="challenges-card__date-label">
+      <p>D&#xE9;fis en cours</p>
+      <p>Jusqu&#x2019;au 30/06/2026</p>
+    </div>
+    <div class="challenges-card__amount-label"><p>Cagnotte</p></div>
+    <div class="challenges-card__amount"><p class="text-headline-m">0,00 &#x20AC;</p></div>
+  </footer>
+</article>
 </body></html>
 `;
 
@@ -479,15 +485,15 @@ describe('AuchanClient.getLoyaltyInfo', () => {
     const info = await client.getLoyaltyInfo();
 
     expect(info.card.number).toBe('0000000000000');
-    expect(info.card.holder).toBe('DOE John');
+    expect(info.card.holder).toBe('John');
     expect(info.balance.amountCents).toBe(346);
     expect(info.balance.amountFormatted).toBe('3,46 €');
-    expect(info.balance.balanceDate).toBe('04/06/2026');
+    expect(info.balance.expiryDate).toBe('31/01/2027');
     expect(info.waoohAccountNumber).toBe('00000000');
     expect(info.jourW.active).toBe(true);
     expect(info.jourW.day).toBe('mercredi');
     expect(info.challenges.cagnotteCents).toBe(0);
-    expect(info.challenges.deadline).toBe('30 juin 2026');
+    expect(info.challenges.deadline).toBe('30/06/2026');
   });
 
   it('appelle bien GET /fidelite/accueil', async () => {

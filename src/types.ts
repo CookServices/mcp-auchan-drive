@@ -108,7 +108,10 @@ export interface LoyaltyInfo {
   balance: {
     amountCents: number;
     amountFormatted: string;
+    /** Date d'arrêté de la cagnotte. Vide : la page ne l'affiche plus. */
     balanceDate: string;
+    /** Date d'expiration de la cagnotte, ex. "31/01/2027". */
+    expiryDate?: string;
   };
   waoohAccountNumber: string;
   jourW: {

@@ -149,6 +149,15 @@ await check('produits favoris', async () => {
   return `${favorites.length} favoris`;
 });
 
+await check('programme de fidélité', async () => {
+  const loyalty = await client.getLoyaltyInfo();
+  assert(loyalty.card.number.length > 0, 'numéro de carte vide');
+  assert(loyalty.waoohAccountNumber.length > 0, 'numéro de compte Waaoh! vide');
+  assert(loyalty.balance.amountFormatted.length > 0, 'montant de cagnotte vide');
+
+  return `cagnotte ${loyalty.balance.amountFormatted}`;
+});
+
 await check('lecture du panier', async () => {
   const cart = await client.getCart();
   assert(Array.isArray(cart.items), 'panier illisible');
