@@ -74,6 +74,27 @@ describe('ChromeCookieProvider', () => {
     await expect(p.getCookie()).resolves.toContain('connect.sid=sid1');
   });
 
+  it('traduit un module natif manquant en message actionnable', async () => {
+    // chrome-cookies-secure delegue le dechiffrement a win-dpapi / keytar,
+    // dependances optionnelles dont l'absence ne se voit qu'a l'appel.
+    const loader = vi.fn().mockResolvedValue({
+      getCookiesPromised: vi.fn().mockRejectedValue(new Error("Cannot find module 'win-dpapi'")),
+    });
+    const p = new ChromeCookieProvider('Default', loader);
+
+    await expect(p.getCookie()).rejects.toThrow(/win-dpapi/);
+    await expect(p.getCookie()).rejects.toThrow(/AUCHAN_BROWSER=firefox/);
+  });
+
+  it('laisse passer les autres erreurs sans les reecrire', async () => {
+    const loader = vi.fn().mockResolvedValue({
+      getCookiesPromised: vi.fn().mockRejectedValue(new Error('EPERM: operation not permitted')),
+    });
+    const p = new ChromeCookieProvider('Default', loader);
+
+    await expect(p.getCookie()).rejects.toThrow('EPERM: operation not permitted');
+  });
+
   it('getCookie() appelle le loader une seule fois si appelé 2× (cache)', async () => {
     const { loader } = makeLoader(FULL_COOKIES);
     const p = new ChromeCookieProvider('Default', loader);
