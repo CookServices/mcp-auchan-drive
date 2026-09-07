@@ -16,11 +16,28 @@ interface StatusError extends Error {
   status: number;
 }
 
+/**
+ * Échec transitoire à retenter, sans code HTTP associé.
+ *
+ * Sous throttling, auchan.fr répond 200 avec un corps vide plutôt qu'un 403 :
+ * la requête paraît réussie et les parsers rendent une liste vide. Cette erreur
+ * rend l'incident visible et déclenche le backoff.
+ */
+export class RetryableError extends Error {
+  readonly retryable = true;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'RetryableError';
+  }
+}
+
 function isStatusError(err: unknown): err is StatusError {
   return err instanceof Error && typeof (err as StatusError).status === 'number';
 }
 
 function isRetryable(err: unknown): boolean {
+  if (err instanceof RetryableError) return true;
   return isStatusError(err) && RETRYABLE_STATUSES.has(err.status);
 }
 

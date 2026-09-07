@@ -4,77 +4,61 @@
  */
 
 import type { OrderDetail, OrderProduct } from '../types.js';
-import { parsePrice, decode } from './html-utils.js';
+import { parsePrice, decode, extractTagBlocks, stripTags, hasClass } from './html-utils.js';
+import { extractEmbeddedProducts } from './product-json.js';
+import { assertAuthenticated, assertAnchor } from './page-guard.js';
 
 /**
  * Parse la page HTML de détail d'une commande.
  *
  * Structure HTML attendue :
  * ```html
- * <!-- Tracker de statut -->
- * <li class="o-orderStatus__step o-orderStatus__step--active"><span>En cours de préparation</span></li>
- *
- * <!-- Créneau de retrait -->
- * <p>Retrait prévu le: mardi 16 juin entre 17h00 et 17h30</p>
- *
- * <!-- Magasin -->
- * <div class="m-storeInfo">
- *   <p class="m-storeInfo__name">Auchan Drive Caluire</p>
- *   <p class="m-storeInfo__address">10 Chemin Jean Petit 69300 CALUIRE-ET-CUIRE</p>
+ * <div class="p-detail__header">
+ *   <span class="a-pointOfService__place">Auchan Drive Caluire</span>
+ *   <span class="a-simplifiedState__label">Retirée</span>
  * </div>
+ * <div class="p-detail__deliveryDate">dimanche 8h30&gt;13h</div>
  *
- * <!-- Total -->
- * <span class="m-orderSummary__totalPrice">38,62 €</span>
+ * <!-- Une section par rayon -->
+ * <section class="o-products__list">
+ *   <div class="o-products__category">Boucherie, volaille, poissonnerie</div>
+ *   <div class="o-products__line m-productItem">
+ *     <article class="product-thumbnail" data-id="…">…</article>
+ *     <script>const productUpdateDetail = {"product":{"name":"Chipolatas",…}};</script>
+ *     <aside class="m-productItem__aside">
+ *       <div class="a-amount__amount">8,34 €</div>
+ *       <div class="p-detail__productQuantity">Quantité : 6</div>
+ *     </aside>
+ *   </div>
+ * </section>
  *
- * <!-- Produits par catégorie -->
- * <h2 class="m-orderProductList__categoryTitle">Boucherie, volaille, poissonnerie</h2>
- * <div class="m-orderProduct">
- *   <p class="m-orderProduct__name"><strong>AUCHAN</strong> Chipolatas supérieures aux herbes</p>
- *   <span class="m-orderProduct__quantity">Quantité : 6</span>
- *   <span class="m-orderProduct__price">8,34 €</span>
- * </div>
+ * <!-- Récapitulatif -->
+ * <div class="m-receipt__total"><span class="m-receipt__label">Total</span>
+ *   <strong class="m-receipt__value">82,12 €</strong></div>
  * ```
+ *
+ * Le nom et la marque sont lus dans le JSON `productUpdateDetail` embarqué plutôt
+ * que dans le markup : il est partagé par toutes les pages produit du site et
+ * survit aux changements de classes CSS.
  */
 export function parseOrderDetailPage(
   html: string,
   orderRef: string,
   orderNumber: string,
 ): OrderDetail {
-  // ── Statut courant (étape active du tracker) ─────────────────────────────────
-  // L'étape active porte une classe contenant "active" ou "current", ou un aria-current.
-  const statusActiveM = html.match(
-    /o-orderStatus__step[^"]*(?:active|current)[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]+)/i,
-  ) ?? html.match(/aria-current="[^"]*"[^>]*>[\s\S]*?<span[^>]*>([^<]+)/i);
+  assertAuthenticated(html, `/client/mes-commandes/${orderRef}/${orderNumber}`);
+  assertAnchor(html, 'p-detail', `/client/mes-commandes/${orderRef}/${orderNumber}`);
 
-  // Fallback : prendre le dernier span dans la liste de statuts non vide
-  const status = statusActiveM
-    ? decode(statusActiveM[1].trim())
-    : extractLastStatus(html);
+  const storeName = textOf(html, 'a-pointOfService__place');
+  const status = textOf(html, 'a-simplifiedState__label');
+  const storeAddress = parseStoreAddress(html, storeName);
 
-  // ── Créneau de retrait ───────────────────────────────────────────────────────
-  const pickupM = html.match(/Retrait pr[eé]vu\s+le\s*:\s*([^\n<]+)/i);
-  const pickupSlot = pickupM ? decode(pickupM[1].trim()) : undefined;
+  // "Retrait prévu le: mardi 16 juin entre 17h00 et 17h30" → on retire le libellé.
+  const deliveryDate = textOf(html, 'p-detail__deliveryDate');
+  const pickupSlot = deliveryDate.replace(/^.*?pr[ée]vu\s+le\s*:\s*/i, '').trim() || undefined;
 
-  // ── Magasin : nom ────────────────────────────────────────────────────────────
-  const storeNameM = html.match(/m-storeInfo__name[^>]*>([^<]+)/)
-    ?? html.match(/class="[^"]*storeName[^"]*"[^>]*>([^<]+)/);
-  const storeName = storeNameM ? decode(storeNameM[1].trim()) : '';
-
-  // ── Magasin : adresse ────────────────────────────────────────────────────────
-  const storeAddrM = html.match(/m-storeInfo__address[^>]*>([\s\S]*?)<\/p>/)
-    ?? html.match(/class="[^"]*storeAddress[^"]*"[^>]*>([\s\S]*?)<\/(?:p|div)>/);
-  const storeAddress = storeAddrM
-    ? decode(storeAddrM[1].replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim())
-    : '';
-
-  // ── Total ─────────────────────────────────────────────────────────────────────
-  const totalM = html.match(/m-orderSummary__totalPrice[^>]*>([^<]+)/)
-    ?? html.match(/orderTotal[^>]*>([^<]+)/);
-  const totalFormatted = totalM ? decode(totalM[1].trim()) : '';
-  const total = parsePrice(totalFormatted);
-
-  // ── Produits par catégorie ────────────────────────────────────────────────────
-  const products = parseProducts(html);
+  // Total : la ligne "Total" du récapitulatif, sinon l'entête de la commande.
+  const totalFormatted = receiptTotal(html) || textOf(html, 'p-detail__totalAmount');
 
   return {
     orderNumber,
@@ -83,90 +67,98 @@ export function parseOrderDetailPage(
     storeAddress,
     status,
     pickupSlot,
-    total,
+    total: parsePrice(totalFormatted),
     totalFormatted,
-    products,
+    products: parseProducts(html),
   };
 }
 
-function extractLastStatus(html: string): string {
-  const stepRe = /o-orderStatus__step[^>]*>[\s\S]*?<span[^>]*>([^<]+)/g;
-  let last = '';
-  let m: RegExpExecArray | null;
-  while ((m = stepRe.exec(html)) !== null) {
-    const t = decode(m[1].trim());
-    if (t) last = t;
-  }
-  return last;
-}
-
+/** Parcourt les sections de rayon et en extrait les lignes produit. */
 function parseProducts(html: string): OrderProduct[] {
   const products: OrderProduct[] = [];
 
-  // Découper en sections par catégorie
-  const catRe = /class="[^"]*m-orderProductList__categoryTitle[^"]*"[^>]*>([^<]+)/g;
-  const catMatches: Array<{ index: number; category: string }> = [];
-  let cM: RegExpExecArray | null;
-  while ((cM = catRe.exec(html)) !== null) {
-    catMatches.push({ index: cM.index, category: decode(cM[1].trim()) });
-  }
+  for (const section of extractTagBlocks(html, 'section', 'o-products__list')) {
+    const category = textOf(section, 'o-products__category');
 
-  if (catMatches.length === 0) {
-    // Pas de catégories : parser tous les produits sans catégorie
-    return parseProductBlocks(html, '');
-  }
+    for (const line of extractTagBlocks(section, 'div', 'o-products__line')) {
+      const [embedded] = extractEmbeddedProducts(line);
 
-  for (let i = 0; i < catMatches.length; i++) {
-    const start = catMatches[i].index;
-    const end = i + 1 < catMatches.length ? catMatches[i + 1].index : html.length;
-    const section = html.slice(start, end);
-    products.push(...parseProductBlocks(section, catMatches[i].category));
+      // Sans JSON embarqué, on retombe sur la description affichée.
+      const name = embedded?.name ?? textOf(line, 'product-thumbnail__description');
+      if (!name) continue;
+
+      const priceFormatted = textOf(line, 'a-amount__amount');
+
+      // "Quantité : 6" → 6
+      const quantityText = textOf(line, 'p-detail__productQuantity');
+      const quantity = Number(quantityText.match(/\d+/)?.[0] ?? 1);
+
+      products.push({
+        productId: embedded?.digitalId || undefined,
+        name,
+        brand: embedded?.brand ?? '',
+        quantity,
+        price: parsePrice(priceFormatted),
+        priceFormatted,
+        category: category || embedded?.category || '',
+        categoryPath: embedded?.categoryPath,
+      });
+    }
   }
 
   return products;
 }
 
-function parseProductBlocks(html: string, category: string): OrderProduct[] {
-  const products: OrderProduct[] = [];
+/**
+ * Adresse du magasin de retrait.
+ *
+ * La page rend deux blocs `p-detail__address` : le magasin puis l'adresse de
+ * facturation du client. On sélectionne explicitement celui intitulé "Magasin"
+ * pour ne jamais remonter l'adresse personnelle du titulaire du compte.
+ */
+function parseStoreAddress(html: string, storeName: string): string {
+  // Le conteneur parent "p-detail__addressesAndDelivery" englobe les deux blocs :
+  // on ne garde que les <div> dont la classe est exactement "p-detail__address".
+  const storeBlock = extractTagBlocks(html, 'div', 'p-detail__address')
+    .filter((b) => hasClass(b.match(/^<div[^>]*>/)?.[0] ?? '', 'p-detail__address'))
+    .find((b) => /<strong>\s*Magasin\s*<\/strong>/i.test(b));
+  if (!storeBlock) return '';
 
-  // Sélectionne les éléments dont la classe contient le token "m-orderProduct"
-  // (suivi de " ou espace, pas de "_"), ce qui exclut m-orderProduct__name, __quantity, etc.
-  const blockRe = /class="[^"]*m-orderProduct(?=["\s])[^"]*"[^>]*>/g;
-  const blockStarts: number[] = [];
-  let bM: RegExpExecArray | null;
-  while ((bM = blockRe.exec(html)) !== null) {
-    blockStarts.push(bM.index);
-  }
+  // Le lien "Infos" et le libellé ne font pas partie de l'adresse.
+  const body = storeBlock
+    .replace(/<strong>[\s\S]*?<\/strong>/i, '')
+    .replace(/<a\b[\s\S]*?<\/a>/gi, '');
 
-  for (let i = 0; i < blockStarts.length; i++) {
-    const start = blockStarts[i];
-    const end = i + 1 < blockStarts.length ? blockStarts[i + 1] : html.length;
-    const block = html.slice(start, end);
+  const lines = body
+    .split(/<br\s*\/?>/i)
+    .map((line) => stripTags(line))
+    .filter(Boolean);
 
-    // Nom et marque
-    const descM = block.match(
-      /m-orderProduct__name[^>]*>([\s\S]*?)<\/p>/,
-    );
-    const descHtml = descM?.[1] ?? '';
-    const brandM = descHtml.match(/<strong[^>]*>\s*([^<]+)\s*<\/strong>/);
-    const brand = brandM ? decode(brandM[1].trim()) : '';
-    const nameRaw = descHtml.replace(/<strong[^>]*>[\s\S]*?<\/strong>/g, '');
-    const name = decode(nameRaw.replace(/<[^>]*>/g, '').replace(/\s+/g, ' ').trim());
+  // La première ligne répète le nom du magasin, déjà exposé par `storeName`.
+  if (lines[0] === storeName) lines.shift();
 
-    if (!name) continue;
+  return lines.join(' ');
+}
 
-    // Quantité : "Quantité : 6" ou "x6" ou juste "6"
-    const qtyM = block.match(/(?:Quantit[eé]\s*:\s*|[×x]\s*)(\d+)/i)
-      ?? block.match(/m-orderProduct__quantity[^>]*>[^<]*?(\d+)/);
-    const quantity = qtyM ? parseInt(qtyM[1], 10) : 1;
+/** Lit la valeur de la ligne "Total" du récapitulatif de commande. */
+function receiptTotal(html: string): string {
+  const totalBlock = html.match(
+    /class="[^"]*m-receipt__total[^"]*"[^>]*>([\s\S]*?)<\/div>/,
+  );
+  if (!totalBlock) return '';
 
-    // Prix
-    const priceM = block.match(/m-orderProduct__price[^>]*>([^<]+)/);
-    const priceFormatted = priceM ? decode(priceM[1].trim()) : '';
-    const price = parsePrice(priceFormatted);
+  const value = totalBlock[1].match(
+    /class="[^"]*m-receipt__value[^"]*"[^>]*>([\s\S]*?)<\//,
+  );
+  return value ? stripTags(value[1]) : '';
+}
 
-    products.push({ name, brand, quantity, price, priceFormatted, category });
-  }
-
-  return products;
+/**
+ * Retourne le texte de l'élément portant `className`, balises internes retirées.
+ * Chaîne vide si l'élément est absent.
+ */
+function textOf(html: string, className: string): string {
+  const m = html.match(new RegExp(`class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\\/`));
+  if (!m) return '';
+  return decode(m[1].replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }

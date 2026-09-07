@@ -9,7 +9,7 @@
  */
 
 import type { CookieProvider, Cart, FavoriteProduct, OrderPeriod, OrderDetail } from '../types.js';
-import { Throttler } from './throttle.js';
+import { Throttler, RetryableError } from './throttle.js';
 import { parseSearchResults, type SearchProduct } from './parser.js';
 import { mapCart, extractCartId } from './cart-mapper.js';
 import { parseLoyaltyPage, type LoyaltyInfo } from './loyalty-parser.js';
@@ -57,36 +57,64 @@ export class AuchanClient {
   // ── Requête HTTP de base (via throttler) ────────────────────────────────────
 
   private async request(url: string, init: RequestInit = {}): Promise<Response> {
+    return this.throttler.run(() => this.perform(url, init));
+  }
+
+  /**
+   * Requête HTML : le corps est lu *dans* la tâche throttlée, pour qu'une
+   * réponse vide déclenche le backoff au lieu d'être rendue comme une page
+   * sans résultat.
+   */
+  private async requestText(url: string, init: RequestInit = {}): Promise<string> {
     return this.throttler.run(async () => {
-      const cookie = await this.cookieProvider.getCookie();
-      const headers: Record<string, string> = {
-        Cookie: cookie,
-        'X-Requested-With': 'XMLHttpRequest',
-        ...(init.headers as Record<string, string> | undefined),
-      };
+      const response = await this.perform(url, init);
+      const text = await response.text();
 
-      const response = await this.fetchFn(url, { ...init, headers });
-
-      if (!response.ok) {
-        // 403 DataDome → invalider le cache de cookies pour le prochain retry
-        if (response.status === 403) {
-          this.cookieProvider.invalidate();
-        }
-        // Capture the response body to help diagnose unexpected errors (e.g. 404 on /boutique/promos)
-        let body = '';
-        try {
-          const text = await response.clone().text();
-          // Strip HTML tags and collapse whitespace for readability; cap at 300 chars
-          body = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
-        } catch { /* ignore body read errors */ }
-        const detail = body ? ` — ${body}` : '';
-        const err = new Error(`HTTP ${response.status}: ${response.statusText}${detail} [url: ${url}]`) as HttpError;
-        err.status = response.status;
-        throw err;
+      // Sous throttling, auchan.fr répond 200 avec un corps vide au lieu d'un 403.
+      // Une page réelle fait toujours plusieurs dizaines de kilo-octets, y compris
+      // une recherche sans résultat : un corps vide est un blocage, pas une absence
+      // de produits. Sans ce test, les parsers rendent [] et le blocage est invisible.
+      if (text.trim().length === 0) {
+        this.cookieProvider.invalidate();
+        throw new RetryableError(
+          `Réponse vide sur ${url} — throttling anti-bot probable, nouvelle tentative.`,
+        );
       }
 
-      return response;
+      return text;
     });
+  }
+
+  /** Exécute la requête HTTP sans throttling ni retry (voir request/requestText). */
+  private async perform(url: string, init: RequestInit = {}): Promise<Response> {
+    const cookie = await this.cookieProvider.getCookie();
+    const headers: Record<string, string> = {
+      Cookie: cookie,
+      'X-Requested-With': 'XMLHttpRequest',
+      ...(init.headers as Record<string, string> | undefined),
+    };
+
+    const response = await this.fetchFn(url, { ...init, headers });
+
+    if (!response.ok) {
+      // 403 DataDome → invalider le cache de cookies pour le prochain retry
+      if (response.status === 403) {
+        this.cookieProvider.invalidate();
+      }
+      // Capture the response body to help diagnose unexpected errors (e.g. 404 on /boutique/promos)
+      let body = '';
+      try {
+        const text = await response.clone().text();
+        // Strip HTML tags and collapse whitespace for readability; cap at 300 chars
+        body = text.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 300);
+      } catch { /* ignore body read errors */ }
+      const detail = body ? ` — ${body}` : '';
+      const err = new Error(`HTTP ${response.status}: ${response.statusText}${detail} [url: ${url}]`) as HttpError;
+      err.status = response.status;
+      throw err;
+    }
+
+    return response;
   }
 
   // ── Extraction du consentId depuis le cookie header ─────────────────────────
@@ -109,11 +137,11 @@ export class AuchanClient {
 
   /** Recherche de produits dans le catalogue Drive. */
   async search(query: string): Promise<SearchProduct[]> {
-    const response = await this.request(
+    const html = await this.requestText(
       `${this.baseUrl}/recherche?text=${encodeURIComponent(query)}`,
       { headers: { Accept: 'text/html' } },
     );
-    return parseSearchResults(await response.text());
+    return parseSearchResults(html);
   }
 
   /** Recherche de produits en promotion sur le drive actif. */
@@ -123,8 +151,11 @@ export class AuchanClient {
     if (category) params.set('category', category);
     const qs = params.toString();
     const url = `${this.baseUrl}/boutique/promos${qs ? `?${qs}` : ''}`;
-    const response = await this.request(url, { headers: { Accept: 'text/html' } });
-    return parseSearchResults(await response.text());
+    const html = await this.requestText(
+      url,
+      { headers: { Accept: 'text/html' } },
+    );
+    return parseSearchResults(html);
   }
 
   /** Lecture du panier courant. */
@@ -134,37 +165,37 @@ export class AuchanClient {
 
   /** Informations du programme de fidélité (cagnotte, carte, Jour W!, défis). */
   async getLoyaltyInfo(): Promise<LoyaltyInfo> {
-    const response = await this.request(`${this.baseUrl}/fidelite/accueil`, {
+    const html = await this.requestText(`${this.baseUrl}/fidelite/accueil`, {
       headers: { Accept: 'text/html' },
     });
-    return parseLoyaltyPage(await response.text());
+    return parseLoyaltyPage(html);
   }
 
   /** Liste des produits favoris (achetés régulièrement) groupés par catégorie. */
   async getFavorites(): Promise<FavoriteProduct[]> {
-    const response = await this.request(`${this.baseUrl}/client/mes-produits-preferes`, {
+    const html = await this.requestText(`${this.baseUrl}/client/mes-produits-preferes`, {
       headers: { Accept: 'text/html' },
     });
-    return parseFavoritesPage(await response.text());
+    return parseFavoritesPage(html);
   }
 
   /** Historique des commandes drive. */
   async getOrders(period: OrderPeriod = '3months'): Promise<Order[]> {
     const queryString = this.buildOrdersPeriodQuery(period);
-    const response = await this.request(
+    const html = await this.requestText(
       `${this.baseUrl}/client/mes-commandes?${queryString}`,
       { headers: { Accept: 'text/html' } },
     );
-    return parseOrdersPage(await response.text());
+    return parseOrdersPage(html);
   }
 
   /** Détail complet d'une commande (produits, créneau de retrait, statut). */
   async getOrderDetail(orderRef: string, orderNumber: string): Promise<OrderDetail> {
-    const response = await this.request(
+    const html = await this.requestText(
       `${this.baseUrl}/client/mes-commandes/${orderRef}/${orderNumber}`,
       { headers: { Accept: 'text/html' } },
     );
-    return parseOrderDetailPage(await response.text(), orderRef, orderNumber);
+    return parseOrderDetailPage(html, orderRef, orderNumber);
   }
 
   /** Convertit une période en query string pour l'API des commandes. */
@@ -183,10 +214,10 @@ export class AuchanClient {
 
   /** Historique des transactions de cagnotte (3 derniers mois). */
   async getLoyaltyHistory(): Promise<LoyaltyTransaction[]> {
-    const response = await this.request(`${this.baseUrl}/fidelite/ma-carte/historique`, {
+    const html = await this.requestText(`${this.baseUrl}/fidelite/ma-carte/historique`, {
       headers: { Accept: 'text/html' },
     });
-    return parseLoyaltyHistoryPage(await response.text());
+    return parseLoyaltyHistoryPage(html);
   }
 
   /** Ajout d'un produit au panier (sans id — article nouveau). */
@@ -222,7 +253,19 @@ export class AuchanClient {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body,
     });
-    return mapCart(await response.json());
+    const cart = mapCart(await response.json());
+
+    // POST /cart/update repond 200 avec le panier inchange quand le produit est
+    // en rupture sur le drive actif. Sans ce controle, l'ajout parait reussi et
+    // l'article manque a la commande.
+    if (!cart.items.some((item) => item.productId === productId)) {
+      throw new Error(
+        `Produit "${productId}" refuse par le panier - probablement en rupture sur le drive actif. `
+        + 'Le panier est inchange.',
+      );
+    }
+
+    return cart;
   }
 
   /** Mise à jour de la quantité d'un article déjà dans le panier. */

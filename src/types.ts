@@ -36,10 +36,14 @@ export interface CookieProvider {
 }
 
 export interface FavoriteProduct {
+  /** UUID produit, identique au productId du panier et de search_product. */
+  productId?: string;
   name: string;
   brand?: string;
   format?: string;
   category: string;
+  /** Taxonomie rayon complète, du plus général au plus fin. */
+  categoryPath?: string[];
   price: number;
   priceFormatted: string;
   pricePerUnit?: string;
@@ -62,12 +66,16 @@ export interface Order {
 }
 
 export interface OrderProduct {
+  /** UUID produit, identique au productId du panier et de search_product. */
+  productId?: string;
   name: string;
   brand: string;
   quantity: number;
   price: number;
   priceFormatted: string;
   category: string;
+  /** Taxonomie rayon complète, du plus général au plus fin. */
+  categoryPath?: string[];
 }
 
 export interface OrderDetail {
@@ -100,7 +108,10 @@ export interface LoyaltyInfo {
   balance: {
     amountCents: number;
     amountFormatted: string;
+    /** Date d'arrêté de la cagnotte. Vide : la page ne l'affiche plus. */
     balanceDate: string;
+    /** Date d'expiration de la cagnotte, ex. "31/01/2027". */
+    expiryDate?: string;
   };
   waoohAccountNumber: string;
   jourW: {

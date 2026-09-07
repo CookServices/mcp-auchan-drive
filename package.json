@@ -37,7 +37,8 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "smoke": "node scripts/smoke-test.mjs",
-    "prepublishOnly": "npm run build && npm test"
+    "prepublishOnly": "npm run build && npm test",
+    "canary": "node scripts/canary.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.29.0",

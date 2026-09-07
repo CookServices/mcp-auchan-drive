@@ -24,13 +24,12 @@ import { createRequire } from 'node:module';
 
 const _require = createRequire(import.meta.url);
 
-// Cookies toujours requis (quelle que soit l'implémentation)
-const REQUIRED = ['lark-session', 'datadome', 'lark-consentId'] as const;
 const AUCHAN_URL = 'https://www.auchan.fr';
 
-// Pour Firefox : ces cookies sont obligatoires pour s'authentifier.
-// Tous les autres cookies www.auchan.fr / .auchan.fr sont envoyés automatiquement
-// (comme un navigateur), ce qui inclut connect.sid, lark-browser-uuid, etc.
+// Cookies dont l'absence signale une session inutilisable. Ils servent de
+// contrôle de présence : tous les autres cookies du domaine sont envoyés en
+// plus, comme le ferait un navigateur.
+const REQUIRED = ['lark-session', 'datadome', 'lark-consentId'] as const;
 const FF_REQUIRED = ['lark-session', 'lark-consentId'] as const;
 
 // ─── EnvCookieProvider ────────────────────────────────────────────────────────
@@ -58,6 +57,58 @@ type ChromeCookiesModule = {
 };
 
 /**
+ * Traduit un échec de chrome-cookies-secure en message actionnable.
+ *
+ * Le déchiffrement des cookies Chrome délègue à un module natif — win-dpapi
+ * sous Windows, keytar sous macOS. Ces modules sont déclarés en dépendances
+ * optionnelles : leur compilation échoue *silencieusement* pendant npm install,
+ * et l'absence ne se manifeste qu'au premier appel, sous la forme d'un
+ * MODULE_NOT_FOUND qui n'oriente vers aucune solution.
+ */
+function explainChromeFailure(err: unknown): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const missingModule = message.match(/Cannot find module '([^']+)'/)?.[1];
+
+  if (!missingModule) return err instanceof Error ? err : new Error(message);
+  return missingNativeModule(missingModule);
+}
+
+/** Message commun aux deux chemins de détection du module natif absent. */
+function missingNativeModule(name: string): Error {
+  return new Error(
+    `Le provider Chrome ne peut pas déchiffrer les cookies : le module natif "${name}" est absent. `
+    + 'Il est déclaré en dépendance optionnelle, sa compilation a donc échoué sans bruit '
+    + 'pendant npm install (sous Windows elle exige Visual Studio Build Tools). '
+    + 'Utilisez AUCHAN_BROWSER=firefox, dont le provider lit cookies.sqlite sans dépendance native, '
+    + 'ou renseignez AUCHAN_COOKIE avec le header Cookie relevé dans le navigateur.',
+  );
+}
+
+/**
+ * Vérifie que le module natif de déchiffrement est installé, avant tout appel.
+ *
+ * chrome-cookies-secure fait son `require` dans un callback synchrone : l'échec
+ * remonte en exception non capturée et tue le processus, hors de portée de tout
+ * try/catch autour de l'appel. La seule façon d'en tirer un message utile est
+ * de résoudre le module en amont.
+ *
+ * Linux n'est pas concerné : la clé y est fixe, sans module natif.
+ */
+function assertNativeDecryptionAvailable(): void {
+  const needed = process.platform === 'win32' ? 'win-dpapi'
+    : process.platform === 'darwin' ? 'keytar'
+      : null;
+  if (!needed) return;
+
+  try {
+    const ccs = _require.resolve('chrome-cookies-secure');
+    createRequire(ccs).resolve(needed);
+  } catch {
+    throw missingNativeModule(needed);
+  }
+}
+
+/**
  * Lit les cookies depuis le profil Chrome local via chrome-cookies-secure.
  * Cache la chaine Cookie en memoire — invalidate() force une relecture.
  */
@@ -66,26 +117,42 @@ export class ChromeCookieProvider implements CookieProvider {
   private cached: string | null = null;
   private readonly loader: () => Promise<ChromeCookiesModule>;
 
+  /** Faux quand un loader est injecté : les tests sautent le contrôle natif. */
+  private readonly usesRealModule: boolean;
+
   constructor(
     profile = process.env.AUCHAN_CHROME_PROFILE ?? 'Default',
     loader?: () => Promise<ChromeCookiesModule>,
   ) {
     this.profile = profile;
+    this.usesRealModule = loader === undefined;
     this.loader = loader ?? (() => import('chrome-cookies-secure') as Promise<ChromeCookiesModule>);
   }
 
   async getCookie(): Promise<string> {
     if (this.cached !== null) return this.cached;
 
-    const chromeCookies = await this.loader();
-    const all = await chromeCookies.getCookiesPromised(AUCHAN_URL, 'object', this.profile);
+    if (this.usesRealModule) assertNativeDecryptionAvailable();
+
+    let all: Record<string, string>;
+    try {
+      const chromeCookies = await this.loader();
+      all = await chromeCookies.getCookiesPromised(AUCHAN_URL, 'object', this.profile);
+    } catch (err) {
+      throw explainChromeFailure(err);
+    }
 
     const missing = REQUIRED.filter((name) => !all[name]);
     if (missing.length > 0) {
       throw new Error('Missing required cookies: ' + missing.join(', '));
     }
 
-    this.cached = REQUIRED.map((name) => name + '=' + all[name]).join('; ');
+    // Envoyer tous les cookies du domaine, comme le fait Firefox. Se limiter à
+    // REQUIRED écartait connect.sid — présent dans Chrome, mais jamais transmis —
+    // et les pages du compte client redirigeaient alors vers Keycloak.
+    this.cached = Object.entries(all)
+      .map(([name, value]) => `${name}=${value}`)
+      .join('; ');
     return this.cached;
   }
 

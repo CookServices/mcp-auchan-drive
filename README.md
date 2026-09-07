@@ -26,6 +26,8 @@ Inspiré de [mcp-leclerc-drive](https://github.com/skunkobi/mcp-leclerc-drive) d
 
 - Node.js ≥ 18
 - Chrome **ou** Firefox installé avec une session Auchan Drive active
+  — sous Windows, Firefox est le seul provider utilisable sans outils de
+  compilation ([détails](#chrome-défaut))
 
 ---
 
@@ -110,6 +112,25 @@ un 403.
 Le serveur lit les cookies via `chrome-cookies-secure` depuis le profil `Default`.
 Pour un autre profil : `AUCHAN_CHROME_PROFILE=Profil 2`.
 
+> **Sous Windows, ce provider ne fonctionne pas sans outils de compilation.**
+>
+> Chrome y chiffre ses cookies via DPAPI, et `chrome-cookies-secure` délègue le
+> déchiffrement à `win-dpapi`, un module natif. Comme il s'agit d'une dépendance
+> *optionnelle*, sa compilation échoue **silencieusement** pendant `npm install` :
+> rien ne le signale, et l'erreur n'apparaît qu'au premier appel.
+>
+> ```
+> Error: Cannot find module 'win-dpapi'
+>     at getDerivedKey (chrome-cookies-secure/index.js:72)
+> ```
+>
+> Le compiler demande [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/)
+> (plusieurs Go). **Utilisez plutôt Firefox** : son provider lit `cookies.sqlite`
+> directement, sans dépendance native.
+>
+> À défaut, `AUCHAN_COOKIE` (voir ci-dessous) fonctionne avec n'importe quel
+> navigateur, au prix d'un copier-coller à renouveler à chaque expiration de session.
+
 ### Mode headless / CI
 
 ```json
@@ -123,21 +144,46 @@ quelle requête vers `www.auchan.fr` → Headers de requête → Cookie).
 
 ## Outils MCP exposés
 
+**Catalogue**
+
 | Outil | Paramètres | Description |
 |---|---|---|
-| `search_product` | `query: string` | Recherche dans le catalogue → liste de produits avec prix, marque, disponibilité |
-| `search_promos` | `query?: string`, `category?: string` | Produits en promotion (sans arg = toutes les promos) |
-| `add_to_cart` | `product_id: string`, `quantity?: number` | Ajoute un produit au panier (utiliser `search_product` d'abord) |
+| `search_product` | `query: string`, `category?: string` | Cherche un produit dans le catalogue du drive actif. Rend nom, marque, prix, format, disponibilité et taxonomie rayon. `category` restreint aux produits dont un niveau de rayon correspond, ce qui écarte les faux positifs |
+| `search_promos` | `query?: string`, `category?: string` | Liste les produits en promotion sur le drive actif (sans argument : toutes les promos) |
+
+**Panier**
+
+| Outil | Paramètres | Description |
+|---|---|---|
+| `add_to_cart` | `product_id: string`, `quantity?: number` | Ajoute un produit au panier. Nécessite un `search_product` préalable dans la même session. Lève si le produit est en rupture sur le drive actif |
 | `remove_from_cart` | `product_id: string` | Retire complètement un produit du panier |
-| `update_quantity` | `product_id: string`, `quantity: number` | Modifie la quantité (0 = retire l'article) |
-| `get_cart` | — | Lit le panier complet avec le total |
+| `update_quantity` | `product_id: string`, `quantity: number` | Modifie la quantité d'une ligne (0 = retire l'article) |
+| `get_cart` | — | Lit le panier : lignes, quantités, prix unitaires et total. `unknownLabels` indique combien de lignes n'ont pas pu être nommées |
+
+**Drive**
+
+| Outil | Paramètres | Description |
+|---|---|---|
 | `find_stores` | `query: string` | Trouve les drives Auchan proches d'une ville ou d'un code postal |
-| `set_store` | `store_id: string`, `store_name?: string` | Sélectionne le drive actif |
+| `set_store` | `store_id: string`, `store_name?: string` | Sélectionne le drive actif, celui dont dépendent prix et disponibilités |
 | `get_store` | — | Affiche le drive actuellement sélectionné |
-| `get_loyalty_info` | — | Lit le programme de fidélité : cagnotte, carte Waaoh, Jour W!, défis |
-| `get_loyalty_history` | — | Historique des transactions de cagnotte des 3 derniers mois |
-| `get_orders` | `period?: string` | Historique des commandes (`10days`, `30days`, `3months`…) |
-| `get_favorites` | — | Liste des produits favoris avec prix actuels et promos en cours |
+
+**Compte client**
+
+| Outil | Paramètres | Description |
+|---|---|---|
+| `get_orders` | `period?: string` | Liste les commandes sur une période : date, magasin, statut, total. Valeurs : `10days`, `30days`, `3months` (défaut), `6months`, `current_year`, `2025`, `2024` |
+| `get_order_detail` | `order_ref: string`, `order_number: string` | Ouvre une commande et rend toutes ses lignes produit, avec quantités, prix et rayon. Les deux paramètres viennent de `get_orders` |
+| `get_favorites` | — | Liste les produits achetés régulièrement, avec prix actuels et promotions en cours |
+| `get_loyalty_info` | — | Rend l'état du programme Waaoh! : cagnotte, carte, Jour W!, défis en cours |
+| `get_loyalty_history` | — | Historique des mouvements de cagnotte des 3 derniers mois |
+
+> Aucun outil ne valide de commande : le serveur remplit le panier, le créneau et
+> le paiement restent à faire sur le site.
+
+En pratique, la boucle utile enchaîne `find_stores` → `set_store`, puis `get_orders`
+et `get_order_detail` pour lire les habitudes, `search_product` pour retrouver les
+produits, `add_to_cart` pour remplir, et `get_cart` pour vérifier ce qui a été écrit.
 
 ### Exemple de session Claude — courses
 

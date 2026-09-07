@@ -4,6 +4,7 @@
  */
 
 import { parsePrice, decode } from './html-utils.js';
+import { extractEmbeddedProducts } from './product-json.js';
 
 export interface SearchProduct {
   productId: string;   // data-product-id
@@ -17,6 +18,8 @@ export interface SearchProduct {
   format?: string;     // span.product-attribute
   available: boolean;  // true si pas class "disabled" sur le quantity-selector
   catalogCode?: string;// href="/produit/pr-C1264653" → "C1264653"
+  category?: string;   // rayon le plus général, ex. "PRODUITS FRAIS"
+  categoryPath?: string[]; // taxonomie complète, du plus général au plus fin
 }
 
 /** Extrait la valeur d'un attribut HTML depuis une balise ouvrante. */
@@ -34,6 +37,12 @@ function attr(tag: string, name: string): string | undefined {
  */
 export function parseSearchResults(html: string): SearchProduct[] {
   const products: SearchProduct[] = [];
+
+  // Le <script> productUpdateDetail est un frère de la carte, pas un descendant :
+  // on indexe la page entière, puis on rattache chaque produit par son identifiant.
+  const taxonomy = new Map(
+    extractEmbeddedProducts(html).filter((p) => p.digitalId).map((p) => [p.digitalId, p]),
+  );
 
   // Balise ouvrante du quantity-selector (chaque produit en a une)
   const tagRe = /<div[^>]+data-product-id="[^"]+"[^>]*>/g;
@@ -58,17 +67,24 @@ export function parseSearchResults(html: string): SearchProduct[] {
     const end = Math.min(html.length, tagMatch.index + 500);
     const ctx = html.slice(start, end);
 
+    const embedded = taxonomy.get(productId);
+
     // Nom du produit — extrait le contenu texte complet du paragraphe (strip balises enfants)
     const descM = ctx.match(/class="[^"]*product-thumbnail__description[^"]*"[^>]*>([\s\S]*?)<\/p>/);
-    const name = descM
+    const htmlName = descM
       ? decode(descM[1].replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim())
       : '';
+
+    // Certaines cartes rendent leur description hors de la fenêtre de contexte :
+    // le JSON embarqué porte alors le nom. Un produit sans nom casse toute
+    // sélection par libellé, ce qui le rend invisible aux appelants.
+    const name = htmlName || embedded?.name || '';
 
     // Marque — cherche d'abord dans la description (structure actuelle), puis dans ctx (fallback)
     const brandM =
       (descM?.[1] ?? '').match(/<strong[^>]*>\s*([^<]+)\s*<\/strong>/) ??
       ctx.match(/<strong[^>]*>\s*([^<]+)\s*<\/strong>/);
-    const brand = brandM ? decode(brandM[1].trim()) : undefined;
+    const brand = brandM ? decode(brandM[1].trim()) : embedded?.brand;
 
     // Prix principal
     const priceM = ctx.match(/class="[^"]*product-price[^"]*"[^>]*>\s*([\d\s,.'€]+)/);
@@ -86,8 +102,12 @@ export function parseSearchResults(html: string): SearchProduct[] {
     const hrefM = ctx.match(/href="[^"]*\/pr-(C\d+)/);
     const catalogCode = hrefM ? hrefM[1] : undefined;
 
-    // Disponibilité
-    const available = !tag.includes('disabled');
+    // Disponibilité : l'<article> porte la classe outOfStock quand le produit
+    // est en rupture sur le drive actif. Le sélecteur de quantité ne suffit pas —
+    // un produit en rupture passait pour disponible, et POST /cart/update
+    // l'ignorait sans erreur.
+    const outOfStock = /class="[^"]*outOfStock/.test(ctx) || ctx.includes('product-unavailable');
+    const available = !tag.includes('disabled') && !outOfStock;
 
     products.push({
       productId,
@@ -101,6 +121,8 @@ export function parseSearchResults(html: string): SearchProduct[] {
       format,
       available,
       catalogCode,
+      category: embedded?.category,
+      categoryPath: embedded?.categoryPath,
     });
   }
 

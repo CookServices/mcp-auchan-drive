@@ -4,7 +4,8 @@
  */
 
 import type { Order } from '../types.js';
-import { parsePrice } from './html-utils.js';
+import { parsePrice, decode, extractTagBlocks } from './html-utils.js';
+import { assertAuthenticated, assertAnchor } from './page-guard.js';
 
 export type { Order };
 
@@ -13,67 +14,57 @@ export type { Order };
  *
  * Structure HTML attendue :
  * ```html
- * <li>
- *   <span>Drive</span>
- *   <span>Auchan Drive Caluire</span>
- *   <span>Commande n° 370069704 du 14 juin 2026</span>
- *   <span>Enregistrée</span>
- *   <span>14 Produits</span>
- *   <span>38,62 €</span>
- *   <a href="/client/mes-commandes/AROM-761999631/370069704">Modifier / Annuler...</a>
+ * <li class="t-orders__item" data-fetch="/customer/async/orders/details/AROM-761999631/370069704/false">
+ *   <div class="p-order">
+ *     <div class="p-order__header">
+ *       <div class="a-pointOfService">
+ *         <span class="a-pointOfService__label">Retrait</span>
+ *         <span class="a-pointOfService__place">Auchan Drive Caluire</span>
+ *       </div>
+ *       <div class="p-order__reference">Commande n° 370069704 du 14 juin 2026</div>
+ *       <div class="a-simplifiedState"><span class="a-simplifiedState__label">Retirée</span></div>
+ *     </div>
+ *     <div class="p-order__footer">
+ *       <div class="m-productThumbnails__count"><span>14</span> Produits</div>
+ *       <div class="p-order__totalAmount">38,62 €</div>
+ *       <a href="/client/mes-commandes/AROM-761999631/370069704">Voir le détail</a>
+ *     </div>
+ *   </div>
  * </li>
  * ```
+ *
+ * Le résumé (nombre de produits, total) est parfois rendu à zéro dans la liste,
+ * la page le complétant ensuite côté client. `get_order_detail` reste la source
+ * fiable pour ces deux champs.
  */
 export function parseOrdersPage(html: string): Order[] {
+  assertAuthenticated(html, '/client/mes-commandes');
+  // Présent même quand la période filtrée ne contient aucune commande.
+  assertAnchor(html, 't-orders__wrapper', '/client/mes-commandes');
+
   const orders: Order[] = [];
 
-  // Extrait chaque bloc <li> contenant un lien vers /client/mes-commandes/
-  const liPattern = /<li[^>]*>([\s\S]*?)<\/li>/g;
-
-  let liMatch: RegExpExecArray | null;
-  while ((liMatch = liPattern.exec(html)) !== null) {
-    const block = liMatch[1];
-
-    // Le bloc doit contenir un lien vers une commande
-    const hrefM = block.match(/href="(\/client\/mes-commandes\/([^/]+)\/(\d+))"/);
+  for (const block of extractTagBlocks(html, 'li', 't-orders__item')) {
+    // Le bloc doit contenir un lien vers le détail de la commande.
+    const hrefM = block.match(/href="(\/client\/mes-commandes\/([^/"]+)\/(\d+))"/);
     if (!hrefM) continue;
 
     const detailUrl = hrefM[1];
     const orderRef = hrefM[2];
     const orderNumber = hrefM[3];
 
-    // Extrait tous les <span>...</span> du bloc
-    const spans: string[] = [];
-    const spanPattern = /<span[^>]*>([^<]*)<\/span>/g;
-    let spanMatch: RegExpExecArray | null;
-    while ((spanMatch = spanPattern.exec(block)) !== null) {
-      const text = spanMatch[1].trim();
-      if (text) spans.push(text);
-    }
+    const storeName = textOf(block, 'a-pointOfService__place');
+    const status = textOf(block, 'a-simplifiedState__label');
 
-    // spans[0] = type (ex: "Drive")
-    // spans[1] = nom du magasin (ex: "Auchan Drive Caluire")
-    // spans[2] = "Commande n° XXXXXX du JJ mois AAAA"
-    // spans[3] = statut (ex: "Enregistrée")
-    // spans[4] = nombre de produits (ex: "14 Produits")
-    // spans[5] = total (ex: "38,62 €")
+    // "Commande n° 370069704 du 14 juin 2026" → "14 juin 2026"
+    const reference = textOf(block, 'p-order__reference');
+    const date = reference.match(/du\s+(.+)$/)?.[1]?.trim() ?? '';
 
-    if (spans.length < 6) continue;
+    // "<span>14</span> Produits" → 14
+    const countText = textOf(block, 'm-productThumbnails__count');
+    const productCount = Number(countText.match(/\d+/)?.[0] ?? 0);
 
-    const storeName = spans[1] ?? '';
-
-    // Parse "Commande n° 370069704 du 14 juin 2026"
-    const orderInfoM = spans[2]?.match(/Commande n°\s*\d+\s+du\s+(.+)/);
-    const date = orderInfoM?.[1]?.trim() ?? '';
-
-    const status = spans[3] ?? '';
-
-    // Parse "14 Produits" → 14
-    const productCountM = spans[4]?.match(/^(\d+)/);
-    const productCount = productCountM ? parseInt(productCountM[1], 10) : 0;
-
-    const totalFormatted = spans[5] ?? '';
-    const total = parseOrderPrice(totalFormatted);
+    const totalFormatted = textOf(block, 'p-order__totalAmount');
 
     orders.push({
       orderRef,
@@ -82,7 +73,7 @@ export function parseOrdersPage(html: string): Order[] {
       storeName,
       status,
       productCount,
-      total,
+      total: parsePrice(totalFormatted),
       totalFormatted,
       detailUrl,
     });
@@ -91,7 +82,12 @@ export function parseOrdersPage(html: string): Order[] {
   return orders;
 }
 
-/** Convertit "38,62 €" → centimes entiers (3862). */
-function parseOrderPrice(text: string): number {
-  return parsePrice(text);
+/**
+ * Retourne le texte de l'élément portant `className`, balises internes retirées.
+ * Chaîne vide si l'élément est absent.
+ */
+function textOf(html: string, className: string): string {
+  const m = html.match(new RegExp(`class="[^"]*${className}[^"]*"[^>]*>([\\s\\S]*?)<\\/`));
+  if (!m) return '';
+  return decode(m[1].replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 }
